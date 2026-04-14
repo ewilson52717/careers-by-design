@@ -1,0 +1,1248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Careers by Design</title>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://accounts.google.com/gsi/client" async></script>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: 'Inter', -apple-system, sans-serif; background: #f7fafd; min-height: 100vh; }
+    h1,h2,h3,.font-headline { font-family: 'Plus Jakarta Sans', -apple-system, sans-serif; }
+    :root { --indigo: #4f46e5; --cyan: #06b6d4; }
+    .brand-grad { background: linear-gradient(135deg, #4f46e5 0%, #06b6d4 100%); }
+    .gradient-text { background: linear-gradient(135deg,#4f46e5,#06b6d4); -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent; }
+    .card { background:white; border-radius:14px; box-shadow:0 1px 3px rgba(0,0,0,.05); border:1px solid #e5e7eb; }
+    .card-hover:hover { box-shadow:0 10px 25px rgba(79,70,229,.1); transform:translateY(-2px); transition:all .2s; }
+    .chip { display:inline-flex; align-items:center; padding:3px 10px; border-radius:999px; font-size:12px; font-weight:600; }
+    .chip-green{background:#ecfdf5;color:#047857} .chip-amber{background:#fffbeb;color:#b45309}
+    .chip-blue{background:#eff6ff;color:#1d4ed8} .chip-red{background:#fef2f2;color:#b91c1c}
+    .chip-gray{background:#f3f4f6;color:#374151} .chip-purple{background:#f5f3ff;color:#6d28d9}
+    input:focus,textarea:focus,select:focus { outline:none; border-color:#4f46e5 !important; box-shadow:0 0 0 3px rgba(79,70,229,.15); }
+    .btn { padding:10px 18px; border-radius:10px; font-weight:600; font-size:14px; transition:all .15s; cursor:pointer; border:none; }
+    .btn-primary { background:#4f46e5; color:white; } .btn-primary:hover{background:#3730a3}
+    .btn-primary:disabled { opacity:.5; cursor:not-allowed; }
+    .btn-secondary { background:white; color:#374151; border:1px solid #d1d5db; } .btn-secondary:hover{background:#f9fafb}
+    .btn-ghost { background:transparent; color:#4f46e5; padding:6px 10px; border-radius:8px; font-weight:500; font-size:13px; }
+    .btn-ghost:hover { background:#eef2ff; }
+    .nav-btn { padding:8px 16px; border-radius:10px; font-weight:500; font-size:14px; color:#4b5563; transition:all .15s; cursor:pointer; border:none; background:transparent; }
+    .nav-btn:hover{background:#f3f4f6} .nav-btn.active{background:#4f46e5;color:white}
+    .progress-bar{height:6px;background:#e5e7eb;border-radius:999px;overflow:hidden}
+    .progress-fill{height:100%;background:linear-gradient(90deg,#4f46e5,#06b6d4);border-radius:999px;transition:width .4s}
+    .slide-in{animation:slideIn .25s ease-out}
+    @keyframes slideIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+    .modal-back{background:rgba(17,24,39,.5);position:fixed;inset:0;z-index:50;display:flex;align-items:center;justify-content:center;padding:20px}
+    .spinner{width:20px;height:20px;border:2px solid rgba(255,255,255,.3);border-top-color:white;border-radius:50%;animation:spin .7s linear infinite;display:inline-block}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    .loading-dots span{animation:bounce 1.4s infinite ease-in-out both;display:inline-block;width:7px;height:7px;border-radius:50%;background:#4f46e5;margin:0 2px}
+    .loading-dots span:nth-child(1){animation-delay:-.32s} .loading-dots span:nth-child(2){animation-delay:-.16s}
+    @keyframes bounce{0%,80%,100%{transform:scale(0)}40%{transform:scale(1)}}
+    .glass-header{background:rgba(255,255,255,.85);backdrop-filter:blur(12px);border-bottom:1px solid rgba(0,0,0,.06)}
+    .setup-step{counter-increment:step}
+    .setup-step::before{content:counter(step);display:flex;align-items:center;justify-content:center;width:28px;height:28px;background:#4f46e5;color:white;border-radius:50%;font-weight:700;font-size:13px;flex-shrink:0}
+    ol.setup-list{counter-reset:step;list-style:none;padding:0}
+  </style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+// ═══════════════════════════════════════════════════════════════════════
+//  CAREERS BY DESIGN  —  Production app
+//  Stack: Google OAuth · Google Sheets API · Apps Script proxy
+//  Hosting: GitHub Pages → careers.spendbydesign.co (GoDaddy CNAME)
+// ═══════════════════════════════════════════════════════════════════════
+
+// ── ① CONFIGURATION  ──────────────────────────────────────────────────
+//  Fill in these four values before deploying. See SETUP_GUIDE.md.
+const CONFIG = {
+  CLIENT_ID:       '951337618881-m757bvgjb2luo0nr8b22g9jftccgojdh.apps.googleusercontent.com',
+  SHEET_ID:        '1ssdOfq9MMtImXFswNhzgKdu2qKmyfyq9Q7Y73M46k9k',
+  APPS_SCRIPT_URL: 'https://script.google.com/macros/s/AKfycbyOQu3sz-FicBZX57LVfgaFiRW8F-OO-aKWOrUOfyV5-hYl2WyygZUKAr67-t4vSCUw_Q/exec',
+  COACH_EMAILS:    ['elyserwilson@gmail.com'],
+  APP_NAME:        'Careers by Design',
+  APP_TAGLINE:     'Spend your job hunt wisely.',
+  API_BASE:        'https://sheets.googleapis.com/v4/spreadsheets',
+};
+const SETUP_COMPLETE = !CONFIG.CLIENT_ID.includes('YOUR_') &&
+                       !CONFIG.SHEET_ID.includes('YOUR_') &&
+                       !CONFIG.APPS_SCRIPT_URL.includes('YOUR_');
+
+// ── ② AUTH LAYER  ─────────────────────────────────────────────────────
+let tokenClient = null, accessToken = null, currentUser = null;
+
+function initAuth() {
+  if (!window.google?.accounts) { setTimeout(initAuth, 300); return; }
+  tokenClient = google.accounts.oauth2.initTokenClient({
+    client_id: CONFIG.CLIENT_ID,
+    scope: 'https://www.googleapis.com/auth/spreadsheets ' +
+           'https://www.googleapis.com/auth/userinfo.email ' +
+           'https://www.googleapis.com/auth/userinfo.profile',
+    callback: async (resp) => {
+      if (resp.error) { showToast('Sign-in failed: ' + resp.error, 'red'); return; }
+      accessToken = resp.access_token;
+      await fetchUserInfo();
+      await loadAndBoot();
+    },
+  });
+}
+
+async function fetchUserInfo() {
+  const res = await fetch('https://www.googleapis.com/oauth2/v3/userinfo',
+    { headers: { Authorization: `Bearer ${accessToken}` } });
+  const info = await res.json();
+  currentUser = { email: info.email, name: info.name, picture: info.picture };
+}
+
+function signIn() {
+  if (!SETUP_COMPLETE) { setState({ page: 'setup' }); return; }
+  tokenClient.requestAccessToken({ prompt: '' });
+}
+function signOut() {
+  if (accessToken) google.accounts.oauth2.revoke(accessToken, () => {});
+  accessToken = null; currentUser = null;
+  state = { page: 'login' };
+  render();
+}
+const isCoach = () => CONFIG.COACH_EMAILS.map(e=>e.toLowerCase()).includes(currentUser?.email?.toLowerCase());
+
+// ── ③ DATA LAYER — Sheets API reads  ──────────────────────────────────
+async function sheetsGet(range) {
+  const url = `${CONFIG.API_BASE}/${CONFIG.SHEET_ID}/values/${encodeURIComponent(range)}`;
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Sheets read failed (${res.status}): ${err}`);
+  }
+  return res.json();
+}
+
+async function scriptPost(payload) {
+  try {
+    const res = await fetch(CONFIG.APPS_SCRIPT_URL, {
+      method: 'POST', redirect: 'follow',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...payload, token: accessToken }),
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || 'Script error');
+    return data;
+  } catch (e) {
+    showToast('Save failed — check your Apps Script URL', 'red');
+    throw e;
+  }
+}
+
+// ── ④ DATA LOADING  ───────────────────────────────────────────────────
+async function loadAndBoot() {
+  showLoadingScreen('Loading your profile…');
+  try {
+    if (isCoach()) {
+      await loadAllClients();
+    } else {
+      await loadMyProfile();
+    }
+    render();
+  } catch (err) {
+    console.error('Boot error:', err);
+    if (err.message?.includes('404') || err.message?.includes('does not exist')) {
+      // Sheet not set up yet
+      state = { page: 'sheet-missing' };
+    } else {
+      state = { page: 'error', errorMsg: err.message };
+    }
+    render();
+  }
+}
+
+async function loadMyProfile() {
+  const email = currentUser.email;
+  // Load client row
+  const clientData = await sheetsGet('Clients!A:I');
+  const rows = clientData.values || [];
+  const headers = rows[0] || [];
+  const myRow = rows.find((r, i) => i > 0 && r[0] === email);
+  if (!myRow) {
+    // New client — show registration
+    state = { page: 'register' };
+    return;
+  }
+  const client = rowToClient(headers, myRow);
+  // Load my jobs
+  const jobData = await sheetsGet('Jobs!A:M');
+  const jobRows = (jobData.values || []).slice(1).filter(r => r[0] === email);
+  client.jobs = jobRows.map(rowToJob);
+  // Load my prep sessions
+  const prepData = await sheetsGet('PrepSessions!A:F');
+  const prepRows = (prepData.values || []).slice(1).filter(r => r[0] === email);
+  client.interviewPrep = buildPrepSummary(prepRows);
+  state = { page: 'client', client, tab: 'intake' };
+}
+
+async function loadAllClients() {
+  const [clientData, jobData, prepData] = await Promise.all([
+    sheetsGet('Clients!A:I'),
+    sheetsGet('Jobs!A:M'),
+    sheetsGet('PrepSessions!A:F'),
+  ]);
+  const headers = (clientData.values || [])[0] || [];
+  const clientRows = (clientData.values || []).slice(1);
+  const allJobs = (jobData.values || []).slice(1);
+  const allPrep = (prepData.values || []).slice(1);
+
+  const clients = clientRows.map(row => {
+    const c = rowToClient(headers, row);
+    c.jobs = allJobs.filter(r => r[0] === c.email).map(rowToJob);
+    c.interviewPrep = buildPrepSummary(allPrep.filter(r => r[0] === c.email));
+    return c;
+  });
+  state = { page: 'coach', clients, drawerClient: null };
+}
+
+// ── ⑤ ROW PARSERS  ────────────────────────────────────────────────────
+// Clients sheet columns: email|name|created_at|questionnaire|profile|dashboard_notes|daily_alerts|coach_notes|coach_alerts
+function rowToClient(headers, row) {
+  const g = (key) => row[headers.indexOf(key)] || '';
+  let questionnaire = null, profile = null;
+  try { questionnaire = JSON.parse(g('questionnaire') || 'null'); } catch(e) {}
+  try { profile = JSON.parse(g('profile') || 'null'); } catch(e) {}
+  return {
+    email: g('email'), name: g('name'), createdAt: g('created_at'),
+    avatar: initials(g('name')),
+    resume: { uploaded: !!questionnaire?.resumeSummary, summary: questionnaire?.resumeSummary || '', fileName: questionnaire?.resumeFile || '' },
+    questionnaire, profile: profile || { analyzed: false },
+    dashboardNotes: g('dashboard_notes'),
+    dailyAlerts: g('daily_alerts') === 'true',
+    coachNotes: g('coach_notes'),
+    coachAlerts: parseInt(g('coach_alerts') || '0', 10),
+  };
+}
+
+// Jobs sheet columns: client_email|id|title|company|location|salary|source|posted|match|status|notes|need_app|created_at
+function rowToJob(row) {
+  return {
+    clientEmail: row[0], id: row[1], title: row[2], company: row[3],
+    location: row[4], salary: row[5], source: row[6], posted: row[7],
+    match: parseInt(row[8] || '75', 10), status: row[9] || 'new',
+    notes: row[10] || '', needApp: row[11] || null,
+  };
+}
+
+// PrepSessions columns: client_email|id|type|status|score|note
+function buildPrepSummary(rows) {
+  const sessions = rows.map(r => ({
+    id: r[1], type: r[2], status: r[3] || 'todo',
+    score: r[4] ? parseInt(r[4]) : null, note: r[5] || '',
+  }));
+  return { sessions, completed: sessions.filter(s => s.status === 'done').length, total: sessions.length };
+}
+
+function initials(name) {
+  const parts = (name || '?').trim().split(/\s+/);
+  return ((parts[0]?.[0] || '') + (parts[1]?.[0] || '')).toUpperCase() || '??';
+}
+
+// ── ⑥ DATA WRITERS (via Apps Script) ─────────────────────────────────
+async function saveClientProfile(patch) {
+  const email = currentUser.email;
+  const client = state.client;
+  const updatedQ = { ...(client.questionnaire || {}), ...patch.questionnaire };
+  const updatedP = patch.profile !== undefined ? patch.profile : client.profile;
+  Object.assign(state.client, patch);
+  state.client.questionnaire = updatedQ;
+  state.client.profile = updatedP;
+  render();
+  await scriptPost({
+    action: 'save_client',
+    email,
+    name: state.client.name || currentUser.name,
+    questionnaire: JSON.stringify(updatedQ),
+    profile: JSON.stringify(updatedP),
+    dashboard_notes: state.client.dashboardNotes || '',
+    daily_alerts: state.client.dailyAlerts ? 'true' : 'false',
+  });
+  showToast('Saved ✓');
+}
+
+async function saveJob(job) {
+  const email = currentUser?.email || job.clientEmail;
+  await scriptPost({ action: 'save_job', email, job });
+  showToast('Job updated ✓');
+}
+
+async function addJobs(jobs) {
+  const email = currentUser.email;
+  for (const j of jobs) {
+    await scriptPost({ action: 'save_job', email, job: j });
+  }
+  state.client.jobs = [...(state.client.jobs || []), ...jobs];
+  render();
+}
+
+async function savePrepSession(session) {
+  const email = currentUser?.email;
+  await scriptPost({ action: 'save_prep', email, session });
+}
+
+async function saveCoachNotes(clientEmail, notes) {
+  await scriptPost({ action: 'save_coach_notes', clientEmail, notes });
+  showToast('Notes saved ✓');
+}
+
+async function registerNewClient(name) {
+  await scriptPost({ action: 'register', email: currentUser.email, name });
+  currentUser.name = name;
+  await loadMyProfile();
+  state.page = 'client';
+  state.tab = 'intake';
+  render();
+}
+
+async function clearCoachAlerts(clientEmail) {
+  await scriptPost({ action: 'clear_alerts', clientEmail });
+  const c = state.clients.find(x => x.email === clientEmail);
+  if (c) { c.coachAlerts = 0; c.jobs.forEach(j => { if(j.needApp==='coach') j.needApp=null; }); }
+  render();
+}
+
+// ── ⑦ STATE  ──────────────────────────────────────────────────────────
+let state = { page: 'login' };
+function setState(patch) { Object.assign(state, patch); render(); }
+
+// ── ⑧ MOCK AI HELPERS (upgrade to real API later)  ───────────────────
+function mockAnalyzeProfile(q) {
+  const strengths = (q.strengths || []).map(s => s.charAt(0).toUpperCase() + s.slice(1));
+  return {
+    analyzed: true,
+    strengths: [...strengths.map(s => `${s} — demonstrated across recent roles`), 'Clear communicator with a coachable mindset'].slice(0,5),
+    gaps: [
+      `Deeper exposure needed at the next level in ${(q.industries||['target industry'])[0]}`,
+      'Quantified outcomes could be sharper on the resume',
+      'Consider building external visibility (writing, speaking, community)',
+    ],
+    recommendedRoles: [q.roleTarget, `Senior ${q.roleTarget}`, `${q.roleTarget}, Growth`, 'Adjacent leadership role'].filter(Boolean),
+    interviewFocus: ['Signature story walkthrough','Stakeholder conflict resolution','Outcome-driven deep-dive'],
+    fitScore: 70 + Math.floor(Math.random() * 22),
+  };
+}
+
+function mockJobSearch(q) {
+  const companies = ['Linear','Notation','Versa AI','Harbor Labs','Stream','Grove','Kindred','Parcel','Moss','Indigo'];
+  const sources = ['LinkedIn','Wellfound','Greenhouse','Company site'];
+  const locs = [q.locationPref || 'Remote (US)', 'Remote', 'Hybrid (NYC)', 'Hybrid (SF)'];
+  const n = 5 + Math.floor(Math.random() * 4);
+  return Array.from({ length: n }, (_, i) => {
+    const floor = q.salaryFloor || 100000;
+    const lo = floor + Math.floor(Math.random() * 15000);
+    const hi = lo + 25000 + Math.floor(Math.random() * 20000);
+    return {
+      id: 'j_' + Date.now() + '_' + i,
+      title: i % 3 === 0 ? `Senior ${q.roleTarget}` : i % 3 === 1 ? `${q.roleTarget}, Growth` : `Lead, ${q.roleTarget}`,
+      company: companies[(i * 3) % companies.length],
+      location: locs[i % locs.length],
+      salary: `$${Math.round(lo/1000)}–${Math.round(hi/1000)}k`,
+      source: sources[i % sources.length],
+      posted: `${1 + Math.floor(Math.random() * 10)}d ago`,
+      match: 70 + Math.floor(Math.random() * 28),
+      status: 'new', notes: '', needApp: null, clientEmail: currentUser.email,
+    };
+  }).sort((a, b) => b.match - a.match);
+}
+
+function mockInterviewQuestions(c, jobTitle) {
+  const q = c.questionnaire || {};
+  const role = jobTitle || q.roleTarget || 'your target role';
+  const isEng = /engineer|developer|tech|software/i.test(role);
+  return {
+    scenarios: [
+      `Walk me through a ${isEng ? 'system design or architecture' : 'go-to-market or campaign'} project you owned end-to-end.`,
+      'Describe a time you navigated a disagreement with a peer or stakeholder. What was the tradeoff?',
+      'Tell me about a failure or a missed goal. What would you do differently now?',
+    ],
+    common: [
+      'Why this role, why this company, why now?',
+      `What does great ${isEng ? 'technical leadership' : 'cross-functional partnership'} look like to you?`,
+      'Where do you want your career to be in 3 years?',
+      'How do you prioritize when everything feels urgent?',
+    ],
+    tips: [
+      `Lead with a signature story that showcases ${(q.strengths || ['your top strength'])[0]}.`,
+      'Quantify outcomes — revenue, time saved, incidents reduced, adoption %.',
+      `Pre-write a 90-day plan for the ${role} role and reference it in the final round.`,
+      'Prepare 3 incisive questions for the hiring manager about scope, ambiguity, and success metrics.',
+    ],
+  };
+}
+
+// ── ⑨ VOICE COACH ENGINE  ────────────────────────────────────────────
+const VOICE_SCRIPTS = {
+  interview: {
+    title: 'Interview Practice',
+    intro: `Hi, I'm your Careers by Design voice coach. I'll run a behavioral interview practice with you using the STAR framework — Situation, Task, Action, Result. Press the mic button and answer each question aloud, just like a real interview. Ready? Let's go.`,
+    questions: [
+      { q: 'Tell me about yourself — keep it to about 90 seconds, like your professional opening statement.' },
+      { q: 'Walk me through a project you led end-to-end. What was your specific role, and what was the outcome?' },
+      { q: 'Describe a time you had a disagreement with a colleague or stakeholder. How did you handle it?' },
+      { q: 'Tell me about a time you failed or missed a goal. What did you learn from it?' },
+      { q: 'Why this role, and why now? What are you hoping your next chapter looks like?' },
+    ],
+  },
+  negotiation: {
+    title: 'Salary Negotiation',
+    intro: `Hello! I'm your Careers by Design negotiation coach. I'll play recruiter and walk you through five tough negotiation moments. The goal is to help you stay calm, anchor confidently, and not leave money on the table. Press the mic when you're ready to respond. Let's begin.`,
+    questions: [
+      { q: 'Great news — we'd like to move forward with an offer. Before I share numbers, can you tell me your salary expectations?' },
+      { q: 'Our budget tops out at one hundred and thirty thousand base. That's really the ceiling of our band. How does that sound?' },
+      { q: 'I hear you, but we can't move on base. Is there anything else that would make this work?' },
+      { q: 'We love you, but we're seeing candidates who'd accept the current offer as-is. Are you sure you want to hold firm?' },
+      { q: 'Okay — if we can get to one forty-five base plus a ten thousand signing bonus, can we shake hands on this today?' },
+    ],
+  },
+};
+
+const VoiceEngine = {
+  recognition: null, speaking: false,
+  init() {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (SR && !this.recognition) {
+      this.recognition = new SR();
+      this.recognition.continuous = false;
+      this.recognition.interimResults = true;
+      this.recognition.lang = 'en-US';
+    }
+  },
+  speak(text, onend) {
+    if (!('speechSynthesis' in window)) { onend?.(); return; }
+    window.speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    u.rate = 1.0;
+    const voices = window.speechSynthesis.getVoices();
+    const pref = voices.find(v => /Jenny|Aria|Samantha|Google US/i.test(v.name)) || voices.find(v => v.lang === 'en-US');
+    if (pref) u.voice = pref;
+    u.onend = () => { this.speaking = false; onend?.(); };
+    u.onerror = () => { this.speaking = false; onend?.(); };
+    this.speaking = true;
+    window.speechSynthesis.speak(u);
+  },
+  listen(onResult, onStatus) {
+    this.init();
+    if (!this.recognition) { onStatus?.('Speech recognition not supported. Try Chrome or Edge.'); return; }
+    let final = '';
+    this.recognition.onresult = (e) => {
+      let interim = '';
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        e.results[i].isFinal ? (final += e.results[i][0].transcript) : (interim += e.results[i][0].transcript);
+      }
+      onStatus?.((final + interim).trim() || 'Listening…');
+    };
+    this.recognition.onend = () => onResult(final.trim());
+    this.recognition.onerror = (e) => { onStatus?.('Error: ' + e.error); onResult(final.trim()); };
+    try { this.recognition.start(); onStatus?.('🔴 Listening… tap mic again to stop'); }
+    catch(e) { onStatus?.('Allow microphone access and try again.'); }
+  },
+  stop() { try { this.recognition?.stop(); } catch(e) {} },
+};
+
+function generateVoiceFeedback(mode, answer) {
+  const a = (answer || '').toLowerCase();
+  const words = a.split(/\s+/).filter(Boolean).length;
+  const strong = [], tips = [];
+  if (words < 15) tips.push('Your answer was brief — aim for 60–90 seconds with a clear situation, action, and result.');
+  if (words > 250) tips.push('Good detail, but tighten it to the 2–3 most important beats and end with the outcome.');
+  if (mode === 'interview') {
+    if (/(result|outcome|impact|led to|grew|saved|reduced|\d+%|\$\d)/i.test(answer)) strong.push('Nice — you mentioned a concrete outcome.');
+    else tips.push('Add a measurable result: dollars, %, time saved, or users impacted.');
+    if (/(situation|context|first|then|finally)/i.test(answer)) strong.push('Clear story structure — I could follow the arc.');
+    else tips.push('Use STAR: set up the Situation, your Task, the Action you took, and the Result.');
+    if (!/\bI\b/.test(answer)) tips.push("Use 'I' more than 'we' — the interviewer needs to see your individual contribution.");
+  } else {
+    if (/(range|band|market|before I|what'?s budgeted)/i.test(answer)) strong.push('Good — you deflected before naming a number.');
+    else if (/\$?\d{3}|\bk\b/.test(answer)) tips.push("You anchored first — try flipping it: 'What range has been budgeted for this role?'");
+    if (/(bonus|equity|signing|pto|vacation|start date|remote)/i.test(answer)) strong.push('Great — you expanded beyond base salary.');
+    else tips.push('Remember to negotiate the full package: signing bonus, equity, PTO, start date.');
+    if (/\bokay\b|\bsure\b|\bi guess\b/i.test(answer) && !/however|but|actually/i.test(answer)) tips.push("Watch for soft-acceptance language ('okay', 'sure'). You may be conceding implicitly.");
+  }
+  return [strong.map(s => '✅ ' + s).join('<br>'), tips.map(t => '🎯 ' + t).join('<br>')].filter(Boolean).join('<br><br>') || '✅ Solid answer. Try to be even more specific next time.';
+}
+
+function voiceStart() {
+  const mode = state.voiceMode || 'interview';
+  state.voiceSession = { started: true, idx: 0, transcripts: [], feedback: [] };
+  render();
+  setTimeout(() => {
+    VoiceEngine.speak(VOICE_SCRIPTS[mode].intro, () => {
+      VoiceEngine.speak(VOICE_SCRIPTS[mode].questions[0].q);
+    });
+  }, 300);
+}
+function voiceNext() {
+  const mode = state.voiceMode || 'interview';
+  const script = VOICE_SCRIPTS[mode];
+  const s = state.voiceSession;
+  if (!s) return;
+  if (s.idx >= script.questions.length - 1) {
+    s.idx = script.questions.length; render();
+    VoiceEngine.speak('That wraps our session. Review the transcript and coaching notes below. Keep practicing — preparation turns nerves into confidence. Great work!');
+    return;
+  }
+  s.idx++; render();
+  setTimeout(() => VoiceEngine.speak(script.questions[s.idx].q), 150);
+}
+function voiceMicToggle() {
+  if (VoiceEngine.speaking) window.speechSynthesis?.cancel();
+  const btn = document.getElementById('micBtn');
+  const statusEl = document.getElementById('micStatus');
+  if (btn?.dataset.listening === '1') { VoiceEngine.stop(); btn.dataset.listening = '0'; return; }
+  if (btn) { btn.dataset.listening = '1'; btn.classList.add('ring-4','ring-red-300'); }
+  VoiceEngine.listen((final) => {
+    if (btn) { btn.dataset.listening = '0'; btn.classList.remove('ring-4','ring-red-300'); }
+    const mode = state.voiceMode || 'interview';
+    const s = state.voiceSession;
+    if (!s || !final) { statusEl && (statusEl.textContent = 'Didn\'t catch that — try again.'); return; }
+    const q = VOICE_SCRIPTS[mode].questions[s.idx].q;
+    const fb = generateVoiceFeedback(mode, final);
+    s.transcripts.push({ question: q, answer: final });
+    s.feedback.push(fb);
+    render();
+    VoiceEngine.speak(fb.replace(/<[^>]+>/g,' ').replace(/[✅🎯]/g,'').trim().slice(0,220), voiceNext);
+  }, (msg) => { statusEl && (statusEl.textContent = msg); });
+}
+
+// ── ⑩ RENDER  ─────────────────────────────────────────────────────────
+function render() {
+  document.getElementById('app').innerHTML = buildPage();
+  bindEvents();
+}
+
+function buildPage() {
+  if (!SETUP_COMPLETE) return renderSetupWizard();
+  switch (state.page) {
+    case 'login':    return renderLogin();
+    case 'register': return renderRegister();
+    case 'client':   return renderHeader() + `<main class="max-w-6xl mx-auto px-4 py-8">${renderClientTabs()}</main>` + renderFooter();
+    case 'coach':    return renderHeader() + `<main class="max-w-7xl mx-auto px-4 py-8">${renderCoach()}</main>` + renderFooter();
+    case 'loading':  return renderLoadingScreen(state.loadingMsg);
+    case 'error':    return `<div class="min-h-screen flex items-center justify-center p-8"><div class="card p-8 max-w-md text-center"><div class="text-4xl mb-3">⚠️</div><h2 class="font-bold text-gray-900">Something went wrong</h2><p class="text-sm text-gray-600 mt-2">${state.errorMsg || 'Unknown error'}</p><button onclick="location.reload()" class="btn btn-primary mt-4">Reload</button></div></div>`;
+    default: return renderLogin();
+  }
+}
+
+// ── LOGIN  ─────────────────────────────────────────────────────────────
+function renderLogin() {
+  return `
+  <div class="min-h-screen flex flex-col items-center justify-center px-4" style="background:linear-gradient(135deg,#f8faff 0%,#eef2ff 100%)">
+    <div class="card p-10 max-w-md w-full text-center">
+      <div class="flex justify-center mb-5">
+        <div class="w-16 h-16 brand-grad rounded-2xl flex items-center justify-center shadow-lg">
+          ${compassSVG(32)}
+        </div>
+      </div>
+      <h1 class="text-2xl font-bold text-gray-900 font-headline">${CONFIG.APP_NAME}</h1>
+      <p class="text-gray-500 mt-1 text-sm">${CONFIG.APP_TAGLINE}</p>
+      <button data-action="sign-in" class="btn btn-primary w-full mt-8 flex items-center justify-center gap-2">
+        <svg width="18" height="18" viewBox="0 0 18 18"><path fill="#fff" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844a4.14 4.14 0 01-1.796 2.716v2.259h2.908c1.702-1.567 2.684-3.875 2.684-6.615z"/><path fill="rgba(255,255,255,.8)" d="M9 18c2.43 0 4.467-.806 5.956-2.184l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 009 18z"/><path fill="rgba(255,255,255,.6)" d="M3.964 10.706A5.41 5.41 0 013.682 9c0-.593.102-1.17.282-1.706V4.962H.957A8.996 8.996 0 000 9c0 1.452.348 2.827.957 4.038l3.007-2.332z"/><path fill="rgba(255,255,255,.4)" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 00.957 4.962L3.964 7.294C4.672 5.163 6.656 3.58 9 3.58z"/></svg>
+        Sign in with Google
+      </button>
+      <p class="text-xs text-gray-400 mt-4">Clients and coaches sign in with the same button.<br>Your role is detected automatically.</p>
+    </div>
+    <p class="text-xs text-gray-400 mt-6">© ${new Date().getFullYear()} ${CONFIG.APP_NAME} · <a href="https://spendbydesign.co" class="underline">Spend by Design</a></p>
+  </div>`;
+}
+
+function renderRegister() {
+  return `
+  <div class="min-h-screen flex items-center justify-center px-4" style="background:linear-gradient(135deg,#f8faff 0%,#eef2ff 100%)">
+    <div class="card p-8 max-w-md w-full">
+      <h2 class="text-xl font-bold text-gray-900 font-headline">Welcome! Let's get you set up.</h2>
+      <p class="text-sm text-gray-500 mt-1">You're signing in as <b>${currentUser?.email}</b>. Just tell us your name to create your account.</p>
+      <input id="reg-name" type="text" placeholder="Your full name" class="mt-5 w-full border border-gray-300 rounded-xl p-3 text-sm" value="${currentUser?.name || ''}" />
+      <button data-action="complete-register" class="btn btn-primary w-full mt-3">Create my account →</button>
+      <button data-action="sign-out" class="btn btn-ghost w-full mt-2">Use a different account</button>
+    </div>
+  </div>`;
+}
+
+// ── HEADER  ────────────────────────────────────────────────────────────
+function renderHeader() {
+  const coach = isCoach();
+  return `
+  <header class="sticky top-0 z-40 glass-header">
+    <div class="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <div class="w-9 h-9 brand-grad rounded-xl flex items-center justify-center shadow-sm">${compassSVG(18)}</div>
+        <div>
+          <div class="font-bold text-gray-900 font-headline tracking-tight">${CONFIG.APP_NAME}</div>
+          <div class="text-xs text-gray-500 -mt-0.5">${CONFIG.APP_TAGLINE}</div>
+        </div>
+      </div>
+      <div class="flex items-center gap-3">
+        ${coach ? `<span class="chip chip-purple">Coach</span>` : ''}
+        <div class="flex items-center gap-2 text-sm text-gray-600">
+          ${currentUser?.picture ? `<img src="${currentUser.picture}" class="w-8 h-8 rounded-full" />` : `<div class="w-8 h-8 brand-grad rounded-full flex items-center justify-center text-white text-xs font-bold">${initials(currentUser?.name)}</div>`}
+          <span class="hidden sm:block">${currentUser?.name?.split(' ')[0] || ''}</span>
+        </div>
+        <button data-action="sign-out" class="btn btn-secondary text-xs px-3 py-2">Sign out</button>
+      </div>
+    </div>
+  </header>`;
+}
+
+function renderFooter() {
+  return `<footer class="max-w-7xl mx-auto px-4 py-8 text-center text-xs text-gray-400">
+    ${CONFIG.APP_NAME} · <a href="https://spendbydesign.co" class="underline">Spend by Design</a> · © ${new Date().getFullYear()}
+  </footer>`;
+}
+
+function compassSVG(size) {
+  return `<svg viewBox="0 0 24 24" fill="none" width="${size}" height="${size}" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9" opacity=".3"/><path d="M12 3.5 L14.2 12 L12 10 L9.8 12 Z" fill="white" stroke="none"/><path d="M12 20.5 L9.8 12 L12 14 L14.2 12 Z" fill="white" opacity=".55" stroke="none"/></svg>`;
+}
+
+// ── CLIENT TABS  ───────────────────────────────────────────────────────
+function renderClientTabs() {
+  const tab = state.tab || 'intake';
+  const c = state.client;
+  const tabs = [['intake','Intake'],['profile','My Profile'],['jobs','Job Search'],['prep','Interview Prep'],['voice','🎙️ Voice Coach'],['dashboard','Dashboard']];
+  return `
+    <div class="flex gap-1 mb-6 overflow-x-auto pb-1">
+      ${tabs.map(([k,l]) => `<button data-action="set-tab" data-tab="${k}" class="nav-btn ${tab===k?'active':''}">${l}</button>`).join('')}
+    </div>
+    <div class="slide-in">
+      ${tab==='intake'?renderIntake(c):tab==='profile'?renderProfile(c):tab==='jobs'?renderJobs(c):tab==='prep'?renderPrep(c):tab==='voice'?renderVoice():renderDashboard(c)}
+    </div>`;
+}
+
+// ── INTAKE  ────────────────────────────────────────────────────────────
+function renderIntake(c) {
+  const q = c.questionnaire || {};
+  return `
+  <div class="grid md:grid-cols-3 gap-6">
+    <div class="md:col-span-2 space-y-6">
+      <div class="card p-6">
+        <div class="flex items-center justify-between mb-4">
+          <div><h2 class="text-xl font-bold font-headline">1. Resume</h2><p class="text-sm text-gray-500">Upload or paste a summary of your latest resume.</p></div>
+          ${c.resume?.uploaded ? `<span class="chip chip-green">Uploaded</span>` : `<span class="chip chip-gray">Pending</span>`}
+        </div>
+        ${c.resume?.uploaded ? `
+          <div class="flex items-center gap-3 bg-gray-50 rounded-xl p-3">
+            <div class="w-10 h-10 bg-indigo-100 rounded-lg flex items-center justify-center text-indigo-600 font-bold text-sm">PDF</div>
+            <div class="flex-1 min-w-0">
+              <div class="font-medium text-gray-900 text-sm">${c.resume.fileName || 'Resume on file'}</div>
+              <div class="text-xs text-gray-500 truncate">${(c.resume.summary||'').slice(0,120)}${(c.resume.summary||'').length>120?'…':''}</div>
+            </div>
+            <button data-action="clear-resume" class="btn btn-ghost text-xs">Replace</button>
+          </div>` : `
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Paste resume summary</label>
+            <textarea id="resume-summary" rows="4" class="w-full border border-gray-300 rounded-xl p-3 text-sm" placeholder="Paste a short summary of your work history, skills, and key achievements…">${q.resumeSummary||''}</textarea>
+            <input id="resume-filename" class="mt-2 w-full border border-gray-300 rounded-xl p-2 text-sm" placeholder="File name (optional, e.g. Jane_Smith_Resume.pdf)" value="${q.resumeFile||''}" />
+            <button data-action="save-resume" class="btn btn-primary mt-3 text-sm">Save resume</button>
+          </div>`}
+      </div>
+
+      <div class="card p-6">
+        <h2 class="text-xl font-bold font-headline mb-1">2. About you</h2>
+        <p class="text-sm text-gray-500 mb-5">Help us understand how you work and what you want next.</p>
+        <div class="grid md:grid-cols-2 gap-4">
+          <div><label class="text-sm font-medium text-gray-700">Work style</label>
+            <select id="q-workStyle" class="mt-1 w-full border border-gray-300 rounded-xl p-2 text-sm">
+              ${['collaborative','deep-focus','hybrid','fast-paced','structured'].map(v=>`<option ${q.workStyle===v?'selected':''}>${v}</option>`).join('')}
+            </select></div>
+          <div><label class="text-sm font-medium text-gray-700">Target role</label>
+            <input id="q-roleTarget" value="${q.roleTarget||''}" class="mt-1 w-full border border-gray-300 rounded-xl p-2 text-sm" placeholder="e.g. Senior Product Manager" /></div>
+          <div><label class="text-sm font-medium text-gray-700">Location preference</label>
+            <input id="q-locationPref" value="${q.locationPref||''}" class="mt-1 w-full border border-gray-300 rounded-xl p-2 text-sm" placeholder="Remote, NYC, Hybrid…" /></div>
+          <div><label class="text-sm font-medium text-gray-700">Salary floor (USD)</label>
+            <input id="q-salaryFloor" type="number" value="${q.salaryFloor||''}" class="mt-1 w-full border border-gray-300 rounded-xl p-2 text-sm" placeholder="120000" /></div>
+          <div class="md:col-span-2"><label class="text-sm font-medium text-gray-700">Top strengths (comma-separated)</label>
+            <input id="q-strengths" value="${(q.strengths||[]).join(', ')}" class="mt-1 w-full border border-gray-300 rounded-xl p-2 text-sm" placeholder="storytelling, analytics, leadership" /></div>
+          <div class="md:col-span-2"><label class="text-sm font-medium text-gray-700">Industries of interest</label>
+            <input id="q-industries" value="${(q.industries||[]).join(', ')}" class="mt-1 w-full border border-gray-300 rounded-xl p-2 text-sm" placeholder="SaaS, FinTech, Healthcare" /></div>
+          <div><label class="text-sm font-medium text-gray-700">What energizes you?</label>
+            <textarea id="q-energizers" rows="2" class="mt-1 w-full border border-gray-300 rounded-xl p-2 text-sm">${q.energizers||''}</textarea></div>
+          <div><label class="text-sm font-medium text-gray-700">What drains you?</label>
+            <textarea id="q-drainers" rows="2" class="mt-1 w-full border border-gray-300 rounded-xl p-2 text-sm">${q.drainers||''}</textarea></div>
+        </div>
+        <button data-action="save-questionnaire" class="btn btn-primary mt-5">Save & analyze profile →</button>
+      </div>
+    </div>
+
+    <div class="space-y-5">
+      <div class="card p-6">
+        <h3 class="font-bold">Your progress</h3>
+        <ul class="mt-3 space-y-2 text-sm">
+          ${[['Resume',c.resume?.uploaded],['Questionnaire',!!q.roleTarget],['Profile analyzed',!!c.profile?.analyzed]].map(([l,done])=>`<li class="flex items-center gap-2"><span class="${done?'text-green-600':'text-gray-400'}">${done?'✓':'○'}</span><span class="${done?'text-gray-900':'text-gray-400'}">${l}</span></li>`).join('')}
+        </ul>
+      </div>
+      <div class="card p-6 brand-grad text-white">
+        <h3 class="font-bold">What happens next?</h3>
+        <ol class="text-sm mt-2 space-y-1 opacity-90 list-decimal list-inside">
+          <li>Your coach reviews your intake</li>
+          <li>AI surfaces matching job opportunities</li>
+          <li>You practice with the voice coach</li>
+          <li>Track applications on your dashboard</li>
+        </ol>
+      </div>
+    </div>
+  </div>`;
+}
+
+// ── PROFILE  ───────────────────────────────────────────────────────────
+function renderProfile(c) {
+  if (!c.profile?.analyzed) return `<div class="card p-10 text-center"><div class="text-5xl mb-3">📋</div><h2 class="text-xl font-bold">No analysis yet</h2><p class="text-sm text-gray-500 mt-1">Complete your intake and save — your profile will be analyzed automatically.</p><button data-action="set-tab" data-tab="intake" class="btn btn-primary mt-4">Go to intake</button></div>`;
+  const p = c.profile;
+  return `
+  <div class="grid md:grid-cols-3 gap-6">
+    <div class="md:col-span-2 space-y-6">
+      <div class="card p-6">
+        <div class="flex items-center justify-between mb-5">
+          <h2 class="text-xl font-bold font-headline">Your coaching profile</h2>
+          <div class="text-right"><div class="text-xs text-gray-500">Fit score</div><div class="text-2xl font-bold gradient-text">${p.fitScore}<span class="text-sm text-gray-400">/100</span></div></div>
+        </div>
+        <div class="grid md:grid-cols-2 gap-6">
+          <div><div class="text-xs uppercase tracking-wide text-gray-500 font-semibold mb-2">Key strengths</div>
+            <ul class="space-y-2">${p.strengths.map(s=>`<li class="flex gap-2 text-sm"><span class="text-green-600 shrink-0">●</span>${s}</li>`).join('')}</ul></div>
+          <div><div class="text-xs uppercase tracking-wide text-gray-500 font-semibold mb-2">Growth areas</div>
+            <ul class="space-y-2">${p.gaps.map(s=>`<li class="flex gap-2 text-sm"><span class="text-amber-500 shrink-0">●</span>${s}</li>`).join('')}</ul></div>
+        </div>
+      </div>
+      <div class="card p-6">
+        <h3 class="font-bold mb-3">Recommended role types</h3>
+        <div class="flex flex-wrap gap-2">${p.recommendedRoles.map(r=>`<span class="chip chip-blue">${r}</span>`).join('')}</div>
+        <h4 class="font-bold mt-5 mb-2">Interview focus areas</h4>
+        <ul class="space-y-1">${p.interviewFocus.map(s=>`<li class="flex gap-2 text-sm"><span class="text-indigo-600">●</span>${s}</li>`).join('')}</ul>
+      </div>
+    </div>
+    <div class="space-y-5">
+      <div class="card p-6">
+        <h3 class="font-bold mb-3">Quick actions</h3>
+        <div class="space-y-2">
+          <button data-action="set-tab" data-tab="jobs" class="btn btn-secondary w-full text-left">🔍 Find matching jobs</button>
+          <button data-action="set-tab" data-tab="prep" class="btn btn-secondary w-full text-left">📋 Interview prep plan</button>
+          <button data-action="set-tab" data-tab="voice" class="btn btn-secondary w-full text-left">🎙️ Voice coach</button>
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
+// ── JOBS  ──────────────────────────────────────────────────────────────
+function renderJobs(c) {
+  if (!c.profile?.analyzed) return `<div class="card p-8 text-center"><p class="text-gray-600">Complete your intake first to unlock job search.</p></div>`;
+  const jobs = c.jobs || [];
+  return `
+  <div class="flex flex-wrap items-center justify-between gap-3 mb-6">
+    <div><h2 class="text-2xl font-bold font-headline">Job search</h2><p class="text-sm text-gray-500">Live matches based on your profile.</p></div>
+    <div class="flex gap-2">
+      <button data-action="toggle-alerts" class="btn btn-secondary">${c.dailyAlerts?'🔔 Alerts on':'🔕 Daily alerts'}</button>
+      <button data-action="search-jobs" id="searchBtn" class="btn btn-primary">🔍 Find jobs now</button>
+    </div>
+  </div>
+  <div id="searchStatus"></div>
+  ${jobs.length === 0 ? `<div class="card p-10 text-center"><div class="text-5xl mb-3">🎯</div><p class="text-gray-500">No jobs yet. Click <b>Find jobs now</b> to pull fresh matches.</p></div>` : `
+  <div class="space-y-3">
+    ${jobs.map(j => `
+    <div class="card p-5 card-hover">
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <div class="flex-1 min-w-0">
+          <div class="flex flex-wrap items-center gap-2">
+            <h3 class="font-bold text-gray-900">${j.title}</h3>
+            ${matchChip(j.match)} ${statusChip(j.status)}
+          </div>
+          <div class="text-sm text-gray-600 mt-1">${j.company} · ${j.location} · ${j.salary}</div>
+          <div class="text-xs text-gray-400 mt-1">via ${j.source} · ${j.posted}</div>
+          ${j.notes ? `<div class="mt-2 text-sm bg-gray-50 rounded-lg p-2 border border-gray-100">📝 ${j.notes}</div>` : ''}
+        </div>
+        <div class="flex flex-col items-end gap-2 shrink-0">
+          <select data-action="job-status" data-job="${j.id}" class="text-xs border border-gray-300 rounded-lg px-2 py-1.5">
+            ${['new','interested','applied','interviewing','offer','rejected'].map(s=>`<option value="${s}" ${j.status===s?'selected':''}>${s}</option>`).join('')}
+          </select>
+          <div class="flex gap-1">
+            <button data-action="apply-ai" data-job="${j.id}" class="btn btn-ghost text-xs">✨ AI draft</button>
+            <button data-action="apply-coach" data-job="${j.id}" class="btn btn-ghost text-xs">👤 Alert coach</button>
+          </div>
+          <button data-action="edit-notes" data-job="${j.id}" data-notes="${encodeURIComponent(j.notes||'')}" class="text-xs text-gray-400 hover:text-indigo-600">edit notes</button>
+        </div>
+      </div>
+    </div>`).join('')}
+  </div>`}`;
+}
+
+// ── PREP  ──────────────────────────────────────────────────────────────
+function renderPrep(c) {
+  if (!c.profile?.analyzed) return `<div class="card p-8 text-center"><p class="text-gray-600">Complete intake first.</p></div>`;
+  const ip = c.interviewPrep || { sessions:[], completed:0, total:0 };
+  const pct = ip.total ? Math.round((ip.completed/ip.total)*100) : 0;
+  const defaultSessions = ip.sessions.length ? ip.sessions : [
+    { id:'ps1',type:'Behavioral / STAR storytelling',status:'todo',score:null,note:'' },
+    { id:'ps2',type:'Role-specific case / scenario',status:'todo',score:null,note:'' },
+    { id:'ps3',type:'Stakeholder or conflict roleplay',status:'todo',score:null,note:'' },
+    { id:'ps4',type:'Compensation negotiation',status:'todo',score:null,note:'' },
+    { id:'ps5',type:'Final round / exec-level',status:'todo',score:null,note:'' },
+  ];
+  const qs = mockInterviewQuestions(c, (c.jobs||[]).find(j=>j.status==='interviewing')?.title);
+  return `
+  <div class="grid md:grid-cols-3 gap-6">
+    <div class="md:col-span-2 space-y-6">
+      <div class="card p-6">
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="text-xl font-bold font-headline">Prep plan</h2>
+          <span class="text-sm text-gray-500">${ip.completed}/${defaultSessions.length} done</span>
+        </div>
+        <div class="progress-bar mb-5"><div class="progress-fill" style="width:${pct}%"></div></div>
+        <div class="space-y-2">
+          ${defaultSessions.map(s=>`
+          <div class="flex items-center justify-between p-3 rounded-xl border ${s.status==='done'?'bg-green-50 border-green-100':s.status==='in_progress'?'bg-amber-50 border-amber-100':'bg-gray-50 border-gray-100'}">
+            <div>
+              <div class="font-medium text-sm text-gray-900">${s.type}</div>
+              ${s.note?`<div class="text-xs text-gray-500 mt-0.5">${s.note}</div>`:''}
+            </div>
+            <div class="flex items-center gap-3">
+              ${s.score!==null?`<span class="font-bold text-sm text-gray-700">${s.score}</span>`:''}
+              <select data-action="prep-status" data-session="${s.id}" class="text-xs border border-gray-300 rounded px-2 py-1">
+                ${['todo','in_progress','done'].map(v=>`<option value="${v}" ${s.status===v?'selected':''}>${v.replace('_',' ')}</option>`).join('')}
+              </select>
+            </div>
+          </div>`).join('')}
+        </div>
+      </div>
+      <div class="card p-6">
+        <h3 class="font-bold mb-3">Tailored questions</h3>
+        <ul class="space-y-2 text-sm text-gray-700">${qs.scenarios.map(q=>`<li class="flex gap-2"><span class="text-indigo-600 font-bold shrink-0">Q.</span>${q}</li>`).join('')}</ul>
+        <h4 class="font-bold mt-5 mb-2">Common questions</h4>
+        <ul class="space-y-1 text-sm text-gray-700">${qs.common.map(q=>`<li>• ${q}</li>`).join('')}</ul>
+      </div>
+    </div>
+    <div class="space-y-5">
+      <div class="card p-6">
+        <h3 class="font-bold mb-3">Coaching tips</h3>
+        <ul class="space-y-2 text-sm">${qs.tips.map(t=>`<li class="flex gap-2"><span class="text-cyan-600 shrink-0">💡</span>${t}</li>`).join('')}</ul>
+      </div>
+      <div class="card p-6 brand-grad text-white">
+        <h3 class="font-bold">Practice with your coach</h3>
+        <p class="text-sm opacity-90 mt-1">Book a live mock interview session tailored to a specific role.</p>
+        <a href="mailto:${CONFIG.COACH_EMAILS[0]}?subject=Mock interview request" class="inline-block mt-3 bg-white text-indigo-700 font-semibold rounded-xl px-4 py-2 text-sm">Request session</a>
+      </div>
+    </div>
+  </div>`;
+}
+
+// ── VOICE COACH  ───────────────────────────────────────────────────────
+function renderVoice() {
+  const mode = state.voiceMode || 'interview';
+  const script = VOICE_SCRIPTS[mode];
+  const session = state.voiceSession || { started:false,idx:0,transcripts:[],feedback:[] };
+  const supported = ('speechSynthesis' in window) && (('webkitSpeechRecognition' in window)||('SpeechRecognition' in window));
+  return `
+  <div class="grid md:grid-cols-3 gap-6">
+    <div class="md:col-span-2 space-y-6">
+      <div class="card p-6">
+        <div class="flex flex-wrap items-center justify-between gap-3 mb-5">
+          <div><h2 class="text-xl font-bold font-headline">🎙️ Voice Coach</h2><p class="text-sm text-gray-500">Speak your answers aloud and get real-time coaching.</p></div>
+          <div class="inline-flex bg-gray-100 rounded-xl p-1">
+            <button data-action="voice-mode" data-mode="interview" class="nav-btn ${mode==='interview'?'active':''}">Interview</button>
+            <button data-action="voice-mode" data-mode="negotiation" class="nav-btn ${mode==='negotiation'?'active':''}">Negotiation</button>
+          </div>
+        </div>
+        ${!supported?`<div class="p-4 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-900 mb-4">⚠️ Open in <b>Chrome</b> or <b>Edge</b> for voice features. Allow mic access when prompted.</div>`:''}
+        <div class="rounded-2xl bg-gradient-to-br from-indigo-50 via-white to-cyan-50 border border-indigo-100 p-6">
+          <div class="flex items-start gap-4">
+            <div class="w-14 h-14 brand-grad rounded-full flex items-center justify-center text-2xl shrink-0 shadow" id="coachAvatar">🎙️</div>
+            <div class="flex-1 min-w-0">
+              <div class="text-xs uppercase tracking-wide text-indigo-600 font-semibold">Careers by Design · ${script.title}</div>
+              <div id="coachSpeech" class="mt-1 text-gray-900 leading-relaxed text-sm">${session.started?(script.questions[session.idx]?.q||'Session complete — great work!'):(script.intro)}</div>
+            </div>
+          </div>
+          <div class="mt-6 flex flex-col items-center gap-3">
+            ${!session.started?`
+              <button data-action="voice-start" class="btn btn-primary px-8 py-3 text-base">▶️ Start session</button>
+              <p class="text-xs text-gray-500">${script.questions.length} questions · ~${script.questions.length*2} min</p>` : `
+              <button id="micBtn" data-action="voice-mic" class="w-20 h-20 rounded-full brand-grad text-white flex items-center justify-center text-4xl shadow-lg hover:scale-105 transition">🎤</button>
+              <div id="micStatus" class="text-sm text-gray-500">Tap the mic and answer aloud</div>
+              <div class="flex gap-2 mt-1">
+                <button data-action="voice-replay" class="btn btn-secondary text-sm">🔁 Repeat</button>
+                <button data-action="voice-skip" class="btn btn-secondary text-sm">⏭️ Skip</button>
+                <button data-action="voice-end" class="btn btn-secondary text-sm">⏹️ End</button>
+              </div>`}
+          </div>
+          ${session.started?`<div class="mt-5"><div class="flex justify-between text-xs text-gray-500 mb-1"><span>Question ${Math.min(session.idx+1,script.questions.length)} of ${script.questions.length}</span><span>${Math.round(session.idx/script.questions.length*100)}%</span></div><div class="progress-bar"><div class="progress-fill" style="width:${session.idx/script.questions.length*100}%"></div></div></div>`:''}
+        </div>
+      </div>
+      ${session.transcripts.length?`
+      <div class="card p-6">
+        <h3 class="font-bold mb-4">Session transcript & coaching</h3>
+        <div class="space-y-5">
+          ${session.transcripts.map((t,i)=>`<div><div class="text-xs font-semibold uppercase text-gray-500">Q${i+1}</div><div class="text-sm text-gray-800 mt-1">${t.question}</div><div class="text-xs font-semibold uppercase text-gray-500 mt-3">You said</div><div class="text-sm bg-gray-50 rounded-xl p-3 border border-gray-100 mt-1">"${t.answer}"</div><div class="text-xs font-semibold uppercase text-indigo-600 mt-3">💡 Coaching</div><div class="text-sm mt-1">${session.feedback[i]||''}</div></div>`).join('<hr class="border-gray-100"/>')}
+        </div>
+      </div>`:''}
+    </div>
+    <div class="space-y-5">
+      <div class="card p-6">
+        <h3 class="font-bold mb-3">${mode==='interview'?'Interview tips':'Negotiation tactics'}</h3>
+        <ul class="space-y-2 text-sm text-gray-700">
+          ${mode==='interview'?`
+            <li class="flex gap-2"><span class="text-cyan-600 shrink-0">•</span>Use <b>STAR</b>: Situation, Task, Action, Result.</li>
+            <li class="flex gap-2"><span class="text-cyan-600 shrink-0">•</span>Quantify outcomes — revenue, %, users, time.</li>
+            <li class="flex gap-2"><span class="text-cyan-600 shrink-0">•</span>Keep answers to 60–90 seconds.</li>
+            <li class="flex gap-2"><span class="text-cyan-600 shrink-0">•</span>End every story with what you learned.</li>
+            <li class="flex gap-2"><span class="text-cyan-600 shrink-0">•</span>Prepare 3 smart questions for the hiring manager.</li>
+          `:`
+            <li class="flex gap-2"><span class="text-cyan-600 shrink-0">•</span>Never name a number first — ask for their range.</li>
+            <li class="flex gap-2"><span class="text-cyan-600 shrink-0">•</span>After countering, <b>stay silent</b>.</li>
+            <li class="flex gap-2"><span class="text-cyan-600 shrink-0">•</span>Negotiate <b>total comp</b>: base, bonus, equity, PTO.</li>
+            <li class="flex gap-2"><span class="text-cyan-600 shrink-0">•</span>Cite market data: "Based on ranges I'm seeing…"</li>
+            <li class="flex gap-2"><span class="text-cyan-600 shrink-0">•</span>Get everything <b>in writing</b> before accepting verbally.</li>
+            <li class="flex gap-2"><span class="text-cyan-600 shrink-0">•</span>Know your BATNA — your walk-away alternative.</li>
+          `}
+        </ul>
+      </div>
+      <div class="card p-6 brand-grad text-white">
+        <h3 class="font-bold">Privacy note</h3>
+        <p class="text-sm opacity-90 mt-1">Your voice is processed entirely in your browser using the Web Speech API. Nothing is recorded or sent to a server.</p>
+      </div>
+    </div>
+  </div>`;
+}
+
+// ── DASHBOARD  ────────────────────────────────────────────────────────
+function renderDashboard(c) {
+  const jobs = c.jobs || [];
+  const counts = jobs.reduce((a,j)=>{a[j.status]=(a[j.status]||0)+1;return a;},{});
+  const prep = c.interviewPrep||{completed:0,total:0};
+  const pct = prep.total?Math.round(prep.completed/prep.total*100):0;
+  return `
+  <div class="grid sm:grid-cols-4 gap-4 mb-6">
+    ${[['Tracking',jobs.length,'bg-white border-gray-200'],['Applied',counts.applied,'bg-indigo-50 border-indigo-100 text-indigo-900'],['Interviewing',counts.interviewing,'bg-amber-50 border-amber-100 text-amber-900'],['Offers',counts.offer,'bg-emerald-50 border-emerald-100 text-emerald-900']].map(([l,v,cls])=>`<div class="card p-5 ${cls}"><div class="text-xs uppercase tracking-wide opacity-70 font-semibold">${l}</div><div class="text-3xl font-bold mt-1">${v||0}</div></div>`).join('')}
+  </div>
+  <div class="grid md:grid-cols-3 gap-6">
+    <div class="md:col-span-2 card p-6">
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="font-bold font-headline">Pipeline</h3>
+        <button data-action="set-tab" data-tab="jobs" class="btn btn-ghost text-sm">Manage →</button>
+      </div>
+      ${jobs.length===0?`<p class="text-gray-500 text-sm">No jobs tracked yet.</p>`:`
+      <div class="overflow-x-auto"><table class="w-full text-sm">
+        <thead class="text-xs uppercase text-gray-500 border-b border-gray-200"><tr><th class="text-left py-2">Role</th><th class="text-left">Company</th><th class="text-left">Status</th><th class="text-left">Match</th></tr></thead>
+        <tbody>${jobs.map(j=>`<tr class="border-b border-gray-100"><td class="py-2 font-medium">${j.title}</td><td class="text-gray-600">${j.company}</td><td>${statusChip(j.status)}</td><td class="text-gray-600">${j.match}%</td></tr>`).join('')}</tbody>
+      </table></div>`}
+    </div>
+    <div class="space-y-5">
+      <div class="card p-6">
+        <h3 class="font-bold mb-2">Interview prep</h3>
+        <div class="text-sm text-gray-600">${prep.completed} of ${prep.total||5} sessions complete</div>
+        <div class="progress-bar mt-2"><div class="progress-fill" style="width:${pct}%"></div></div>
+        <button data-action="set-tab" data-tab="prep" class="btn btn-ghost mt-3 text-sm">Continue →</button>
+      </div>
+      <div class="card p-6">
+        <h3 class="font-bold mb-2">Notes</h3>
+        <textarea id="dash-notes" rows="6" class="w-full border border-gray-300 rounded-xl p-2 text-sm" placeholder="Jot down thoughts, wins, reminders…">${c.dashboardNotes||''}</textarea>
+        <button data-action="save-notes" class="btn btn-ghost mt-2 text-sm">Save notes</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+// ── COACH VIEW  ────────────────────────────────────────────────────────
+function renderCoach() {
+  const clients = state.clients || [];
+  const totalJobs = clients.reduce((n,c)=>n+(c.jobs?.length||0),0);
+  const activeInterviews = clients.reduce((n,c)=>n+(c.jobs?.filter(j=>j.status==='interviewing').length||0),0);
+  const totalAlerts = clients.reduce((n,c)=>n+(c.coachAlerts||0),0);
+  return `
+  <div class="flex flex-wrap items-center justify-between gap-3 mb-6">
+    <div><h2 class="text-2xl font-bold font-headline">Coach dashboard</h2><p class="text-sm text-gray-500">All your clients in one place.</p></div>
+    <button data-action="refresh" class="btn btn-secondary">↻ Refresh</button>
+  </div>
+  <div class="grid sm:grid-cols-4 gap-4 mb-6">
+    ${[['Clients',clients.length,'bg-white border-gray-200'],['Jobs tracked',totalJobs,'bg-indigo-50 border-indigo-100 text-indigo-900'],['Interviewing',activeInterviews,'bg-amber-50 border-amber-100 text-amber-900'],['Alerts',totalAlerts,'bg-red-50 border-red-100 text-red-900']].map(([l,v,cls])=>`<div class="card p-5 ${cls}"><div class="text-xs uppercase tracking-wide opacity-70 font-semibold">${l}</div><div class="text-3xl font-bold mt-1">${v||0}</div></div>`).join('')}
+  </div>
+  <div class="card overflow-hidden">
+    <div class="p-4 border-b border-gray-200 font-bold">My clients</div>
+    <div class="overflow-x-auto"><table class="w-full text-sm">
+      <thead class="bg-gray-50 text-xs uppercase text-gray-500">
+        <tr><th class="text-left px-4 py-3">Client</th><th class="text-left">Target role</th><th class="text-left">Fit</th><th class="text-left">Pipeline</th><th class="text-left">Prep</th><th class="text-left">Alerts</th><th></th></tr>
+      </thead>
+      <tbody>
+        ${clients.length===0?`<tr><td colspan="7" class="px-4 py-8 text-center text-gray-400">No clients signed up yet.</td></tr>`:
+          clients.map(c=>{
+            const prep=c.interviewPrep||{completed:0,total:0};
+            const pct=prep.total?Math.round(prep.completed/prep.total*100):0;
+            return `<tr class="border-t border-gray-100 hover:bg-gray-50">
+              <td class="px-4 py-3"><div class="flex items-center gap-3"><div class="w-9 h-9 brand-grad rounded-full flex items-center justify-center text-white text-xs font-bold">${c.avatar}</div><div><div class="font-medium">${c.name}</div><div class="text-xs text-gray-500">${c.email}</div></div></div></td>
+              <td class="text-gray-700">${c.questionnaire?.roleTarget||'<span class="text-gray-400">— intake pending</span>'}</td>
+              <td>${c.profile?.analyzed?`<span class="font-bold">${c.profile.fitScore}</span>`:'<span class="text-gray-400">—</span>'}</td>
+              <td>${(c.jobs||[]).length} jobs</td>
+              <td class="w-36"><div class="flex items-center gap-2"><div class="progress-bar flex-1"><div class="progress-fill" style="width:${pct}%"></div></div><span class="text-xs text-gray-500">${pct}%</span></div></td>
+              <td>${c.coachAlerts?`<span class="chip chip-red">${c.coachAlerts}</span>`:'<span class="text-gray-400 text-xs">—</span>'}</td>
+              <td class="pr-4 text-right"><button data-action="open-drawer" data-email="${c.email}" class="btn btn-ghost text-sm">Open →</button></td>
+            </tr>`;
+          }).join('')}
+      </tbody>
+    </table></div>
+  </div>
+  ${state.drawerClient ? renderCoachDrawer(state.drawerClient) : ''}`;
+}
+
+function renderCoachDrawer(c) {
+  const alertJobs = (c.jobs||[]).filter(j=>j.needApp==='coach');
+  return `
+  <div class="modal-back" data-action="close-drawer">
+    <div class="bg-white rounded-2xl w-full max-w-2xl max-h-[88vh] overflow-hidden flex flex-col" onclick="event.stopPropagation()">
+      <div class="p-5 border-b border-gray-200 flex items-center justify-between">
+        <div class="flex items-center gap-3">
+          <div class="w-11 h-11 brand-grad rounded-full flex items-center justify-center text-white font-bold">${c.avatar}</div>
+          <div><div class="font-bold">${c.name}</div><div class="text-xs text-gray-500">${c.email} · joined ${c.createdAt}</div></div>
+        </div>
+        <button data-action="close-drawer" class="text-gray-400 hover:text-gray-700 text-2xl leading-none">×</button>
+      </div>
+      <div class="p-6 overflow-y-auto space-y-5">
+        ${c.profile?.analyzed?`
+        <div class="grid md:grid-cols-2 gap-4">
+          <div class="card p-4"><div class="text-xs font-semibold uppercase text-gray-500">Strengths</div><ul class="mt-2 text-sm space-y-1">${(c.profile.strengths||[]).slice(0,3).map(s=>`<li>• ${s}</li>`).join('')}</ul></div>
+          <div class="card p-4"><div class="text-xs font-semibold uppercase text-gray-500">Gaps</div><ul class="mt-2 text-sm space-y-1">${(c.profile.gaps||[]).slice(0,3).map(s=>`<li>• ${s}</li>`).join('')}</ul></div>
+        </div>`:`<div class="card p-6 text-center text-gray-500 text-sm">Intake not yet complete.</div>`}
+        ${alertJobs.length?`
+        <div class="card p-4 bg-red-50 border-red-100">
+          <h4 class="font-bold text-red-900">⚡ Action needed</h4>
+          <p class="text-sm text-red-800 mt-1">${c.name} flagged ${alertJobs.length} job${alertJobs.length>1?'s':''} for you to handle.</p>
+          <ul class="mt-2 text-sm text-red-800">${alertJobs.map(j=>`<li>• ${j.title} @ ${j.company}</li>`).join('')}</ul>
+          <button data-action="clear-alerts" data-email="${c.email}" class="btn btn-primary mt-3 text-sm">Mark handled</button>
+        </div>`:''}
+        <div>
+          <h4 class="font-bold mb-2">Job pipeline</h4>
+          ${(c.jobs||[]).length===0?`<p class="text-sm text-gray-500">No jobs tracked.</p>`:`
+          <div class="space-y-2">${(c.jobs||[]).map(j=>`<div class="flex items-center justify-between p-3 rounded-xl border border-gray-200"><div class="text-sm"><span class="font-medium">${j.title}</span> <span class="text-gray-500">· ${j.company} · ${j.salary}</span></div><div class="flex gap-2 items-center">${statusChip(j.status)}${matchChip(j.match)}</div></div>`).join('')}</div>`}
+        </div>
+        <div class="card p-4">
+          <h4 class="font-bold mb-2">Coach notes (private)</h4>
+          <textarea id="coach-notes-field" rows="4" class="w-full border border-gray-300 rounded-xl p-2 text-sm" placeholder="Notes only you can see…">${c.coachNotes||''}</textarea>
+          <button data-action="save-coach-notes" data-email="${c.email}" class="btn btn-ghost mt-2 text-sm">Save notes</button>
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
+// ── SETUP WIZARD  ─────────────────────────────────────────────────────
+function renderSetupWizard() {
+  return `
+  <div class="min-h-screen flex items-center justify-center px-4 py-12" style="background:#f7fafd">
+    <div class="card p-8 max-w-xl w-full">
+      <div class="flex items-center gap-3 mb-6">
+        <div class="w-10 h-10 brand-grad rounded-xl flex items-center justify-center">${compassSVG(20)}</div>
+        <h1 class="text-xl font-bold font-headline">Careers by Design — Setup</h1>
+      </div>
+      <p class="text-sm text-gray-600 mb-6">Open this file in a text editor, find the <code class="bg-gray-100 px-1 rounded">CONFIG</code> block at the top, and fill in the four values below. Full instructions are in <b>SETUP_GUIDE.md</b>.</p>
+      <ol class="setup-list space-y-4">
+        <li class="setup-step flex gap-3 items-start"><div class="flex-1"><b>Google OAuth Client ID</b><br><code class="text-xs text-indigo-600">CLIENT_ID: 'YOUR_GOOGLE_OAUTH_CLIENT_ID…'</code><p class="text-xs text-gray-500 mt-1">Google Cloud Console → APIs & Services → Credentials → Create OAuth 2.0 Client ID (Web application)</p></div></li>
+        <li class="setup-step flex gap-3 items-start"><div class="flex-1"><b>Google Sheet ID</b><br><code class="text-xs text-indigo-600">SHEET_ID: 'YOUR_GOOGLE_SHEET_ID'</code><p class="text-xs text-gray-500 mt-1">Create a Google Sheet with tabs: Clients, Jobs, PrepSessions. The ID is in the URL: docs.google.com/spreadsheets/d/<b>[ID]</b>/edit</p></div></li>
+        <li class="setup-step flex gap-3 items-start"><div class="flex-1"><b>Apps Script proxy URL</b><br><code class="text-xs text-indigo-600">APPS_SCRIPT_URL: 'YOUR_APPS_SCRIPT_DEPLOYED_URL'</code><p class="text-xs text-gray-500 mt-1">Deploy CareersProxy.gs as a Web App (anyone, even anonymous). Paste the deployment URL here.</p></div></li>
+        <li class="setup-step flex gap-3 items-start"><div class="flex-1"><b>Your coach email</b><br><code class="text-xs text-indigo-600">COACH_EMAILS: ['your@email.com']</code><p class="text-xs text-gray-500 mt-1">The email you sign in with. This unlocks the coach view automatically.</p></div></li>
+      </ol>
+      <div class="mt-6 p-4 bg-indigo-50 rounded-xl text-sm text-indigo-900">📄 See <b>SETUP_GUIDE.md</b> for the complete step-by-step guide including the GoDaddy subdomain setup.</div>
+    </div>
+  </div>`;
+}
+
+function renderLoadingScreen(msg) {
+  return `<div class="min-h-screen flex flex-col items-center justify-center gap-4 text-gray-500">
+    <div class="w-14 h-14 brand-grad rounded-2xl flex items-center justify-center shadow">${compassSVG(28)}</div>
+    <div class="loading-dots"><span></span><span></span><span></span></div>
+    <div class="text-sm">${msg||'Loading…'}</div>
+  </div>`;
+}
+function showLoadingScreen(msg) { state = { page:'loading', loadingMsg:msg }; render(); }
+
+// ── CHIPS  ────────────────────────────────────────────────────────────
+function statusChip(s) {
+  const map={new:'chip-gray',interested:'chip-blue',applied:'chip-purple',interviewing:'chip-amber',offer:'chip-green',rejected:'chip-red'};
+  const label={new:'New',interested:'Interested',applied:'Applied',interviewing:'Interviewing',offer:'Offer 🎉',rejected:'Rejected'};
+  return `<span class="chip ${map[s]||'chip-gray'}">${label[s]||s}</span>`;
+}
+function matchChip(m) {
+  return `<span class="chip ${m>=90?'chip-green':m>=80?'chip-blue':m>=70?'chip-amber':'chip-gray'}">${m}% match</span>`;
+}
+
+// ── TOAST  ────────────────────────────────────────────────────────────
+function showToast(msg, color='green') {
+  let t = document.getElementById('toast');
+  if (!t) { t = document.createElement('div'); t.id='toast'; t.style.cssText='position:fixed;bottom:24px;left:50%;transform:translateX(-50%);z-index:9999;transition:opacity .3s'; document.body.appendChild(t); }
+  t.innerHTML = `<div style="background:${color==='red'?'#dc2626':'#059669'};color:white;padding:10px 20px;border-radius:12px;font-size:14px;font-weight:500;box-shadow:0 4px 20px rgba(0,0,0,.2)">${msg}</div>`;
+  t.style.opacity='1';
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => { t.style.opacity='0'; }, 2500);
+}
+
+// ── EVENTS  ───────────────────────────────────────────────────────────
+function bindEvents() {
+  document.querySelectorAll('[data-action]').forEach(el => {
+    const evt = el.tagName === 'SELECT' ? 'change' : 'click';
+    el.addEventListener(evt, handleAction);
+  });
+}
+
+async function handleAction(e) {
+  const el = e.currentTarget;
+  const a = el.dataset.action;
+  const c = state.client;
+
+  switch(a) {
+    case 'sign-in': signIn(); break;
+    case 'sign-out': signOut(); break;
+
+    case 'complete-register': {
+      const name = document.getElementById('reg-name')?.value?.trim();
+      if (!name) { showToast('Enter your name', 'red'); break; }
+      el.disabled = true; el.innerHTML = '<span class="spinner"></span> Creating…';
+      await registerNewClient(name); break; }
+
+    case 'set-tab': setState({ tab: el.dataset.tab }); break;
+    case 'refresh': await loadAndBoot(); break;
+
+    case 'save-resume': {
+      const summary = document.getElementById('resume-summary')?.value?.trim();
+      const fileName = document.getElementById('resume-filename')?.value?.trim();
+      if (!summary) { showToast('Paste a resume summary first', 'red'); break; }
+      el.disabled=true; el.innerHTML='<span class="spinner"></span> Saving…';
+      await saveClientProfile({ resume:{uploaded:true,summary,fileName}, questionnaire:{...(c.questionnaire||{}),resumeSummary:summary,resumeFile:fileName} });
+      break; }
+
+    case 'clear-resume':
+      await saveClientProfile({ resume:{uploaded:false,summary:'',fileName:''}, questionnaire:{...(c.questionnaire||{}),resumeSummary:'',resumeFile:''} }); break;
+
+    case 'save-questionnaire': {
+      const q = {
+        workStyle: document.getElementById('q-workStyle')?.value,
+        roleTarget: document.getElementById('q-roleTarget')?.value?.trim(),
+        locationPref: document.getElementById('q-locationPref')?.value?.trim(),
+        salaryFloor: parseInt(document.getElementById('q-salaryFloor')?.value||'0',10)||null,
+        strengths: document.getElementById('q-strengths')?.value?.split(',').map(s=>s.trim()).filter(Boolean),
+        industries: document.getElementById('q-industries')?.value?.split(',').map(s=>s.trim()).filter(Boolean),
+        energizers: document.getElementById('q-energizers')?.value?.trim(),
+        drainers: document.getElementById('q-drainers')?.value?.trim(),
+        resumeSummary: c.questionnaire?.resumeSummary,
+        resumeFile: c.questionnaire?.resumeFile,
+      };
+      if (!q.roleTarget) { showToast('Enter a target role first', 'red'); break; }
+      el.disabled=true; el.innerHTML='<span class="spinner"></span> Saving & analyzing…';
+      const profile = mockAnalyzeProfile(q);
+      await saveClientProfile({ questionnaire:q, profile, resume:{...(c.resume||{}),uploaded:!!q.resumeSummary} });
+      setState({ tab:'profile' }); break; }
+
+    case 'search-jobs': {
+      const btn = document.getElementById('searchBtn');
+      const status = document.getElementById('searchStatus');
+      if (btn) { btn.disabled=true; btn.innerHTML='<span class="spinner"></span> Scanning…'; }
+      if (status) status.innerHTML=`<div class="card p-4 mb-4 bg-indigo-50 border-indigo-100"><div class="flex items-center gap-3 text-indigo-900"><span class="loading-dots"><span></span><span></span><span></span></span><span>Scanning LinkedIn, Wellfound, Greenhouse…</span></div></div>`;
+      setTimeout(async () => {
+        const fresh = mockJobSearch(c.questionnaire||{});
+        const existingIds = new Set((c.jobs||[]).map(j=>j.id));
+        const newJobs = fresh.filter(j=>!existingIds.has(j.id));
+        await addJobs(newJobs);
+      }, 1400); break; }
+
+    case 'toggle-alerts':
+      await saveClientProfile({ dailyAlerts: !c.dailyAlerts }); break;
+
+    case 'job-status': {
+      const jid = el.dataset.job;
+      const job = c.jobs.find(j=>j.id===jid);
+      if (!job) break;
+      job.status = el.value;
+      render();
+      await saveJob(job); break; }
+
+    case 'apply-ai': {
+      const jid = el.dataset.job;
+      const job = c.jobs.find(j=>j.id===jid);
+      if (!job) break;
+      job.needApp='self'; if(job.status==='new') job.status='interested';
+      render();
+      await saveJob(job);
+      showToast('✨ AI is drafting your resume, cover letter & outreach message.');
+      break; }
+
+    case 'apply-coach': {
+      const jid = el.dataset.job;
+      const job = c.jobs.find(j=>j.id===jid);
+      if (!job) break;
+      job.needApp='coach'; if(job.status==='new') job.status='interested';
+      c.coachAlerts = (c.coachAlerts||0) + 1;
+      render();
+      await saveJob(job);
+      showToast('👤 Your coach has been notified.'); break; }
+
+    case 'edit-notes': {
+      const jid = el.dataset.job;
+      const job = c.jobs.find(j=>j.id===jid);
+      if (!job) break;
+      const v = prompt('Notes for ' + job.title + ':', decodeURIComponent(el.dataset.notes||''));
+      if (v === null) break;
+      job.notes = v; render();
+      await saveJob(job); break; }
+
+    case 'prep-status': {
+      const sid = el.dataset.session;
+      const ip = c.interviewPrep;
+      const s = ip.sessions.find(x=>x.id===sid);
+      if (!s) {
+        // session not yet in Sheets — create it with the new status
+        const defaultTypes={ps1:'Behavioral / STAR storytelling',ps2:'Role-specific case / scenario',ps3:'Stakeholder or conflict roleplay',ps4:'Compensation negotiation',ps5:'Final round / exec-level'};
+        const newS = { id:sid, type:defaultTypes[sid]||'Session', status:el.value, score:null, note:'' };
+        ip.sessions.push(newS);
+        ip.total = ip.sessions.length;
+        ip.completed = ip.sessions.filter(x=>x.status==='done').length;
+        render();
+        await savePrepSession(newS);
+      } else {
+        s.status = el.value;
+        ip.completed = ip.sessions.filter(x=>x.status==='done').length;
+        render();
+        await savePrepSession(s);
+      } break; }
+
+    case 'save-notes': {
+      const notes = document.getElementById('dash-notes')?.value || '';
+      c.dashboardNotes = notes;
+      await saveClientProfile({ dashboardNotes: notes }); break; }
+
+    case 'voice-mode':
+      state.voiceSession = null;
+      setState({ voiceMode: el.dataset.mode }); break;
+    case 'voice-start': voiceStart(); break;
+    case 'voice-mic': voiceMicToggle(); break;
+    case 'voice-replay': { const q=VOICE_SCRIPTS[state.voiceMode||'interview'].questions[state.voiceSession?.idx]?.q; if(q) VoiceEngine.speak(q); break; }
+    case 'voice-skip': voiceNext(); break;
+    case 'voice-end': VoiceEngine.stop(); window.speechSynthesis?.cancel(); setState({ voiceSession:null }); break;
+
+    case 'open-drawer': {
+      const email = el.dataset.email;
+      const dc = (state.clients||[]).find(x=>x.email===email);
+      setState({ drawerClient: dc }); break; }
+
+    case 'close-drawer':
+      if (e.target===el || el.dataset.action==='close-drawer') setState({ drawerClient:null }); break;
+
+    case 'clear-alerts': {
+      const email = el.dataset.email;
+      await clearCoachAlerts(email); break; }
+
+    case 'save-coach-notes': {
+      const email = el.dataset.email;
+      const notes = document.getElementById('coach-notes-field')?.value||'';
+      const dc = (state.clients||[]).find(x=>x.email===email);
+      if (dc) dc.coachNotes = notes;
+      await saveCoachNotes(email, notes); break; }
+  }
+}
+
+// ── BOOT  ─────────────────────────────────────────────────────────────
+if ('speechSynthesis' in window) {
+  window.speechSynthesis.getVoices();
+  window.speechSynthesis.onvoiceschanged = () => window.speechSynthesis.getVoices();
+}
+if (SETUP_COMPLETE) initAuth();
+render();
+</script>
+</body>
+</html>
