@@ -164,16 +164,26 @@ async function sheetsGet(range) {
 
 async function scriptPost(payload) {
   try {
+    // Content-Type MUST be text/plain — application/json triggers a CORS
+    // preflight that Apps Script Web Apps don't answer. Apps Script reads
+    // the raw body via e.postData.contents regardless of content-type.
     const res = await fetch(CONFIG.APPS_SCRIPT_URL, {
       method: 'POST', redirect: 'follow',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify({ ...payload, token: accessToken }),
     });
-    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status} — is your Apps Script deployed with "Who has access: Anyone"?`);
+    }
+    const text = await res.text();
+    let data;
+    try { data = JSON.parse(text); }
+    catch { throw new Error(`Non-JSON response (likely a Google login page). First 120 chars: ${text.slice(0,120)}`); }
     if (!data.ok) throw new Error(data.error || 'Script error');
     return data;
   } catch (e) {
-    showToast('Save failed — check your Apps Script URL', 'red');
+    console.error('[scriptPost]', e);
+    showToast(`Save failed — ${e.message || 'check your Apps Script URL'}`, 'red');
     throw e;
   }
 }
