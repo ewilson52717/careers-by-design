@@ -98,7 +98,6 @@ const CONFIG = {
   COACH_EMAILS:    ['elyserwilson@gmail.com'],
   APP_NAME:        'Careers by Design',
   APP_TAGLINE:     'Spend your job hunt wisely.',
-  API_BASE:        'https://sheets.googleapis.com/v4/spreadsheets',
 };
 const SETUP_COMPLETE = !CONFIG.CLIENT_ID.includes('YOUR_') &&
                        !CONFIG.SHEET_ID.includes('YOUR_') &&
@@ -111,8 +110,9 @@ function initAuth() {
   if (!window.google?.accounts) { setTimeout(initAuth, 300); return; }
   tokenClient = google.accounts.oauth2.initTokenClient({
     client_id: CONFIG.CLIENT_ID,
-    scope: 'https://www.googleapis.com/auth/spreadsheets ' +
-           'https://www.googleapis.com/auth/userinfo.email ' +
+    // Non-sensitive scopes only. Sheet reads/writes go through the Apps
+    // Script proxy, so neither clients nor coaches need direct Sheet access.
+    scope: 'https://www.googleapis.com/auth/userinfo.email ' +
            'https://www.googleapis.com/auth/userinfo.profile',
     callback: async (resp) => {
       if (resp.error) { showToast('Sign-in failed: ' + resp.error, 'red'); return; }
@@ -151,36 +151,43 @@ let viewAs = null;
 const isViewingAsClient = () => isCoach() && viewAs !== null;
 const viewedEmail = () => viewAs && viewAs !== 'self' ? viewAs : currentUser?.email;
 
-// ── ③ DATA LAYER — Sheets API reads  ──────────────────────────────────
-async function sheetsGet(range) {
-  const url = `${CONFIG.API_BASE}/${CONFIG.SHEET_ID}/values/${encodeURIComponent(range)}`;
-  const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+// ── ③ DATA LAYER — every request goes through the Apps Script proxy  ──
+//  The front-end no longer hits the Sheets API directly. This means:
+//   • clients never need access to the raw Sheet
+//   • the server (Apps Script, running as the coach) is the only thing that
+//     reads/writes rows, and it enforces per-email scoping
+//   • the OAuth scope can stay small (userinfo only)
+
+// Low-level: fires one POST to the Apps Script Web App. Errors bubble up.
+async function scriptCall(payload) {
+  // Content-Type MUST be text/plain — application/json triggers a CORS
+  // preflight that Apps Script Web Apps don't answer. Apps Script reads
+  // the raw body via e.postData.contents regardless of content-type.
+  const res = await fetch(CONFIG.APPS_SCRIPT_URL, {
+    method: 'POST', redirect: 'follow',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify({ ...payload, token: accessToken }),
+  });
   if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`Sheets read failed (${res.status}): ${err}`);
+    throw new Error(`HTTP ${res.status} — is your Apps Script deployed with "Who has access: Anyone"?`);
   }
-  return res.json();
+  const text = await res.text();
+  let data;
+  try { data = JSON.parse(text); }
+  catch { throw new Error(`Non-JSON response (likely a Google login page). First 120 chars: ${text.slice(0,120)}`); }
+  if (!data.ok) throw new Error(data.error || 'Script error');
+  return data;
 }
 
+// For reads: let errors propagate so loadAndBoot can show a proper error screen.
+async function scriptGet(payload) {
+  return scriptCall(payload);
+}
+
+// For writes: also surface a toast so the user knows their save failed.
 async function scriptPost(payload) {
   try {
-    // Content-Type MUST be text/plain — application/json triggers a CORS
-    // preflight that Apps Script Web Apps don't answer. Apps Script reads
-    // the raw body via e.postData.contents regardless of content-type.
-    const res = await fetch(CONFIG.APPS_SCRIPT_URL, {
-      method: 'POST', redirect: 'follow',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ ...payload, token: accessToken }),
-    });
-    if (!res.ok) {
-      throw new Error(`HTTP ${res.status} — is your Apps Script deployed with "Who has access: Anyone"?`);
-    }
-    const text = await res.text();
-    let data;
-    try { data = JSON.parse(text); }
-    catch { throw new Error(`Non-JSON response (likely a Google login page). First 120 chars: ${text.slice(0,120)}`); }
-    if (!data.ok) throw new Error(data.error || 'Script error');
-    return data;
+    return await scriptCall(payload);
   } catch (e) {
     console.error('[scriptPost]', e);
     showToast(`Save failed — ${e.message || 'check your Apps Script URL'}`, 'red');
@@ -212,27 +219,24 @@ async function loadAndBoot() {
   }
 }
 
+// Parses a scoped-data response (from get_my_data / get_client_data) into a
+// fully-shaped client object. Returns null if the client row doesn't exist
+// yet (new user who hasn't registered).
+function hydrateClient(resp) {
+  const clientRows = resp.clients?.values || [];
+  const headers    = clientRows[0] || [];
+  const row        = clientRows[1];
+  if (!row) return null;
+  const client = rowToClient(headers, row);
+  client.jobs = (resp.jobs?.values || []).slice(1).map(rowToJob);
+  client.interviewPrep = buildPrepSummary((resp.prep?.values || []).slice(1));
+  return client;
+}
+
 async function loadMyProfile() {
-  const email = currentUser.email;
-  // Load client row
-  const clientData = await sheetsGet('Clients!A:I');
-  const rows = clientData.values || [];
-  const headers = rows[0] || [];
-  const myRow = rows.find((r, i) => i > 0 && r[0] === email);
-  if (!myRow) {
-    // New client — show registration
-    state = { page: 'register' };
-    return;
-  }
-  const client = rowToClient(headers, myRow);
-  // Load my jobs
-  const jobData = await sheetsGet('Jobs!A:M');
-  const jobRows = (jobData.values || []).slice(1).filter(r => r[0] === email);
-  client.jobs = jobRows.map(rowToJob);
-  // Load my prep sessions
-  const prepData = await sheetsGet('PrepSessions!A:F');
-  const prepRows = (prepData.values || []).slice(1).filter(r => r[0] === email);
-  client.interviewPrep = buildPrepSummary(prepRows);
+  const resp = await scriptGet({ action: 'get_my_data' });
+  const client = hydrateClient(resp);
+  if (!client) { state = { page: 'register' }; return; }
   state = { page: 'client', client, tab: 'intake' };
 }
 
@@ -240,34 +244,18 @@ async function loadMyProfile() {
 // exist yet (e.g. the coach previewing as "self" before completing intake),
 // we fall through to the registration page just like a normal client would.
 async function loadClientByEmail(email) {
-  const clientData = await sheetsGet('Clients!A:I');
-  const rows = clientData.values || [];
-  const headers = rows[0] || [];
-  const theRow = rows.find((r, i) => i > 0 && r[0] === email);
-  if (!theRow) {
-    state = { page: 'register' };
-    return;
-  }
-  const client = rowToClient(headers, theRow);
-  const jobData = await sheetsGet('Jobs!A:M');
-  const jobRows = (jobData.values || []).slice(1).filter(r => r[0] === email);
-  client.jobs = jobRows.map(rowToJob);
-  const prepData = await sheetsGet('PrepSessions!A:F');
-  const prepRows = (prepData.values || []).slice(1).filter(r => r[0] === email);
-  client.interviewPrep = buildPrepSummary(prepRows);
+  const resp = await scriptGet({ action: 'get_client_data', email });
+  const client = hydrateClient(resp);
+  if (!client) { state = { page: 'register' }; return; }
   state = { page: 'client', client, tab: 'intake' };
 }
 
 async function loadAllClients() {
-  const [clientData, jobData, prepData] = await Promise.all([
-    sheetsGet('Clients!A:I'),
-    sheetsGet('Jobs!A:M'),
-    sheetsGet('PrepSessions!A:F'),
-  ]);
-  const headers = (clientData.values || [])[0] || [];
-  const clientRows = (clientData.values || []).slice(1);
-  const allJobs = (jobData.values || []).slice(1);
-  const allPrep = (prepData.values || []).slice(1);
+  const resp = await scriptGet({ action: 'get_all_data' });
+  const headers    = (resp.clients?.values || [])[0] || [];
+  const clientRows = (resp.clients?.values || []).slice(1);
+  const allJobs    = (resp.jobs?.values    || []).slice(1);
+  const allPrep    = (resp.prep?.values    || []).slice(1);
 
   const clients = clientRows.map(row => {
     const c = rowToClient(headers, row);
