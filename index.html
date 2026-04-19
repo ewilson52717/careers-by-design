@@ -4,45 +4,80 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Careers by Design</title>
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://accounts.google.com/gsi/client" async></script>
   <style>
+    /* ── Careers by Design · Parlor-inspired theme ─────────────────────────
+       palette: warm cream + ink · single ember accent · moss secondary
+       type:    Fraunces display · Inter body                                */
+    :root {
+      --cream:     #faf8f4;
+      --ivory:     #fffdf8;
+      --ink:       #1a1410;
+      --ink-2:     #3b342a;
+      --ink-3:     #7a6f5f;
+      --edge:      #e9dfcc;
+      --edge-soft: #f0e8d8;
+      --parchment: #f5ede0;
+      --ember:     #a64c2c;
+      --ember-2:   #7a3620;
+      --ember-3:   #c26b45;
+      --moss:      #6d7a52;
+      --indigo:    var(--ember);   /* legacy alias */
+      --cyan:      var(--moss);    /* legacy alias */
+    }
     * { box-sizing: border-box; }
-    body { font-family: 'Inter', -apple-system, sans-serif; background: #f7fafd; min-height: 100vh; }
-    h1,h2,h3,.font-headline { font-family: 'Plus Jakarta Sans', -apple-system, sans-serif; }
-    :root { --indigo: #4f46e5; --cyan: #06b6d4; }
-    .brand-grad { background: linear-gradient(135deg, #4f46e5 0%, #06b6d4 100%); }
-    .gradient-text { background: linear-gradient(135deg,#4f46e5,#06b6d4); -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent; }
-    .card { background:white; border-radius:14px; box-shadow:0 1px 3px rgba(0,0,0,.05); border:1px solid #e5e7eb; }
-    .card-hover:hover { box-shadow:0 10px 25px rgba(79,70,229,.1); transform:translateY(-2px); transition:all .2s; }
-    .chip { display:inline-flex; align-items:center; padding:3px 10px; border-radius:999px; font-size:12px; font-weight:600; }
-    .chip-green{background:#ecfdf5;color:#047857} .chip-amber{background:#fffbeb;color:#b45309}
-    .chip-blue{background:#eff6ff;color:#1d4ed8} .chip-red{background:#fef2f2;color:#b91c1c}
-    .chip-gray{background:#f3f4f6;color:#374151} .chip-purple{background:#f5f3ff;color:#6d28d9}
-    input:focus,textarea:focus,select:focus { outline:none; border-color:#4f46e5 !important; box-shadow:0 0 0 3px rgba(79,70,229,.15); }
-    .btn { padding:10px 18px; border-radius:10px; font-weight:600; font-size:14px; transition:all .15s; cursor:pointer; border:none; }
-    .btn-primary { background:#4f46e5; color:white; } .btn-primary:hover{background:#3730a3}
+    html, body { background: var(--cream); }
+    body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; color: var(--ink-2); min-height: 100vh; -webkit-font-smoothing: antialiased; }
+    h1,h2,h3,h4,.font-headline { font-family: 'Fraunces', Georgia, 'Times New Roman', serif; font-feature-settings: "ss01","ss02"; letter-spacing: -0.01em; color: var(--ink); }
+    h1,h2 { letter-spacing: -0.02em; }
+    .font-serif { font-family: 'Fraunces', Georgia, serif; }
+    .brand-grad { background: linear-gradient(135deg, var(--ember) 0%, var(--ember-3) 100%); }
+    .gradient-text { background: linear-gradient(135deg, var(--ember), var(--ember-3)); -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent; }
+    .card { background: var(--ivory); border-radius:14px; box-shadow:0 1px 2px rgba(26,20,16,.04); border:1px solid var(--edge); }
+    .card-hover:hover { box-shadow:0 12px 28px rgba(166,76,44,.10); transform:translateY(-2px); transition:all .2s; border-color: #ddd0b4; }
+    .chip { display:inline-flex; align-items:center; padding:3px 10px; border-radius:999px; font-size:12px; font-weight:600; letter-spacing:.01em; }
+    .chip-green {background:#eef3e8; color:#4a5c3e}
+    .chip-amber {background:#faeedc; color:#8a5a1f}
+    .chip-blue  {background:#e9e6db; color:#5a6147}   /* repurposed: soft sage */
+    .chip-red   {background:#f4dfd4; color:#8a3b20}
+    .chip-gray  {background:var(--parchment); color:var(--ink-2)}
+    .chip-purple{background:#f1e5dc; color:var(--ember-2)}  /* repurposed: dusty ember */
+    input,textarea,select { background: var(--ivory); color: var(--ink); border: 1px solid var(--edge); }
+    input:focus,textarea:focus,select:focus { outline:none; border-color: var(--ember) !important; box-shadow:0 0 0 3px rgba(166,76,44,.14); }
+    .btn { padding:10px 18px; border-radius:10px; font-weight:600; font-size:14px; transition:all .15s; cursor:pointer; border:none; letter-spacing:.005em; }
+    .btn-primary { background: var(--ember); color: var(--ivory); }
+    .btn-primary:hover { background: var(--ember-2); }
     .btn-primary:disabled { opacity:.5; cursor:not-allowed; }
-    .btn-secondary { background:white; color:#374151; border:1px solid #d1d5db; } .btn-secondary:hover{background:#f9fafb}
-    .btn-ghost { background:transparent; color:#4f46e5; padding:6px 10px; border-radius:8px; font-weight:500; font-size:13px; }
-    .btn-ghost:hover { background:#eef2ff; }
-    .nav-btn { padding:8px 16px; border-radius:10px; font-weight:500; font-size:14px; color:#4b5563; transition:all .15s; cursor:pointer; border:none; background:transparent; }
-    .nav-btn:hover{background:#f3f4f6} .nav-btn.active{background:#4f46e5;color:white}
-    .progress-bar{height:6px;background:#e5e7eb;border-radius:999px;overflow:hidden}
-    .progress-fill{height:100%;background:linear-gradient(90deg,#4f46e5,#06b6d4);border-radius:999px;transition:width .4s}
-    .slide-in{animation:slideIn .25s ease-out}
-    @keyframes slideIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
-    .modal-back{background:rgba(17,24,39,.5);position:fixed;inset:0;z-index:50;display:flex;align-items:center;justify-content:center;padding:20px}
-    .spinner{width:20px;height:20px;border:2px solid rgba(255,255,255,.3);border-top-color:white;border-radius:50%;animation:spin .7s linear infinite;display:inline-block}
-    @keyframes spin{to{transform:rotate(360deg)}}
-    .loading-dots span{animation:bounce 1.4s infinite ease-in-out both;display:inline-block;width:7px;height:7px;border-radius:50%;background:#4f46e5;margin:0 2px}
-    .loading-dots span:nth-child(1){animation-delay:-.32s} .loading-dots span:nth-child(2){animation-delay:-.16s}
-    @keyframes bounce{0%,80%,100%{transform:scale(0)}40%{transform:scale(1)}}
-    .glass-header{background:rgba(255,255,255,.85);backdrop-filter:blur(12px);border-bottom:1px solid rgba(0,0,0,.06)}
-    .setup-step{counter-increment:step}
-    .setup-step::before{content:counter(step);display:flex;align-items:center;justify-content:center;width:28px;height:28px;background:#4f46e5;color:white;border-radius:50%;font-weight:700;font-size:13px;flex-shrink:0}
-    ol.setup-list{counter-reset:step;list-style:none;padding:0}
+    .btn-secondary { background: var(--ivory); color: var(--ink-2); border:1px solid var(--edge); }
+    .btn-secondary:hover { background: var(--parchment); }
+    .btn-ghost { background:transparent; color: var(--ember); padding:6px 10px; border-radius:8px; font-weight:600; font-size:13px; }
+    .btn-ghost:hover { background: var(--parchment); }
+    .nav-btn { padding:8px 16px; border-radius:10px; font-weight:500; font-size:14px; color: var(--ink-2); transition:all .15s; cursor:pointer; border:none; background:transparent; }
+    .nav-btn:hover { background: var(--parchment); color: var(--ink); }
+    .nav-btn.active { background: var(--ink); color: var(--cream); }
+    .progress-bar { height:6px; background: var(--edge-soft); border-radius:999px; overflow:hidden; }
+    .progress-fill { height:100%; background:linear-gradient(90deg, var(--ember), var(--ember-3)); border-radius:999px; transition:width .4s; }
+    .slide-in { animation:slideIn .25s ease-out; }
+    @keyframes slideIn { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
+    .modal-back { background:rgba(26,20,16,.45); position:fixed; inset:0; z-index:50; display:flex; align-items:center; justify-content:center; padding:20px; }
+    .spinner { width:20px; height:20px; border:2px solid rgba(255,253,248,.3); border-top-color: var(--ivory); border-radius:50%; animation:spin .7s linear infinite; display:inline-block; }
+    @keyframes spin { to{transform:rotate(360deg)} }
+    .loading-dots span { animation:bounce 1.4s infinite ease-in-out both; display:inline-block; width:7px; height:7px; border-radius:50%; background: var(--ember); margin:0 2px; }
+    .loading-dots span:nth-child(1) { animation-delay:-.32s } .loading-dots span:nth-child(2) { animation-delay:-.16s }
+    @keyframes bounce { 0%,80%,100%{transform:scale(0)} 40%{transform:scale(1)} }
+    .glass-header { background:rgba(250,248,244,.82); backdrop-filter:blur(12px); border-bottom:1px solid var(--edge); }
+    .setup-step { counter-increment:step; }
+    .setup-step::before { content:counter(step); display:flex; align-items:center; justify-content:center; width:28px; height:28px; background: var(--ink); color: var(--cream); border-radius:50%; font-weight:700; font-size:13px; flex-shrink:0; font-family: 'Fraunces', serif; }
+    ol.setup-list { counter-reset:step; list-style:none; padding:0; }
+    /* subtle text-selection */
+    ::selection { background: var(--parchment); color: var(--ink); }
+    /* link default */
+    a { color: var(--ember); }
+    a:hover { color: var(--ember-2); }
   </style>
 </head>
 <body>
@@ -566,7 +601,7 @@ function buildPage() {
 // ── LOGIN  ─────────────────────────────────────────────────────────────
 function renderLogin() {
   return `
-  <div class="min-h-screen flex flex-col items-center justify-center px-4" style="background:linear-gradient(135deg,#f8faff 0%,#eef2ff 100%)">
+  <div class="min-h-screen flex flex-col items-center justify-center px-4" style="background:radial-gradient(ellipse at 30% 20%, #fff6e6 0%, #faf8f4 55%, #f0e8d8 100%)">
     <div class="card p-10 max-w-md w-full text-center">
       <div class="flex justify-center mb-5">
         <div class="w-16 h-16 brand-grad rounded-2xl flex items-center justify-center shadow-lg">
@@ -587,7 +622,7 @@ function renderLogin() {
 
 function renderRegister() {
   return `
-  <div class="min-h-screen flex items-center justify-center px-4" style="background:linear-gradient(135deg,#f8faff 0%,#eef2ff 100%)">
+  <div class="min-h-screen flex items-center justify-center px-4" style="background:radial-gradient(ellipse at 30% 20%, #fff6e6 0%, #faf8f4 55%, #f0e8d8 100%)">
     <div class="card p-8 max-w-md w-full">
       <h2 class="text-xl font-bold text-gray-900 font-headline">Welcome! Let's get you set up.</h2>
       <p class="text-sm text-gray-500 mt-1">You're signing in as <b>${currentUser?.email}</b>. Just tell us your name to create your account.</p>
@@ -679,7 +714,7 @@ function renderIntake(c) {
         </div>
         ${c.resume?.uploaded ? `
           <div class="flex items-center gap-3 bg-gray-50 rounded-xl p-3">
-            <div class="w-10 h-10 bg-indigo-100 rounded-lg flex items-center justify-center text-indigo-600 font-bold text-sm">PDF</div>
+            <div class="w-10 h-10 bg-[#ecdfc4] rounded-lg flex items-center justify-center text-[#7a3620] font-bold text-sm">PDF</div>
             <div class="flex-1 min-w-0">
               <div class="font-medium text-gray-900 text-sm">${c.resume.fileName || 'Resume on file'}</div>
               <div class="text-xs text-gray-500 truncate">${(c.resume.summary||'').slice(0,120)}${(c.resume.summary||'').length>120?'…':''}</div>
@@ -764,7 +799,7 @@ function renderProfile(c) {
         <h3 class="font-bold mb-3">Recommended role types</h3>
         <div class="flex flex-wrap gap-2">${p.recommendedRoles.map(r=>`<span class="chip chip-blue">${r}</span>`).join('')}</div>
         <h4 class="font-bold mt-5 mb-2">Interview focus areas</h4>
-        <ul class="space-y-1">${p.interviewFocus.map(s=>`<li class="flex gap-2 text-sm"><span class="text-indigo-600">●</span>${s}</li>`).join('')}</ul>
+        <ul class="space-y-1">${p.interviewFocus.map(s=>`<li class="flex gap-2 text-sm"><span class="text-[#a64c2c]">●</span>${s}</li>`).join('')}</ul>
       </div>
     </div>
     <div class="space-y-5">
@@ -815,7 +850,7 @@ function renderJobs(c) {
             <button data-action="apply-ai" data-job="${j.id}" class="btn btn-ghost text-xs">✨ AI draft</button>
             <button data-action="apply-coach" data-job="${j.id}" class="btn btn-ghost text-xs">👤 Alert coach</button>
           </div>
-          <button data-action="edit-notes" data-job="${j.id}" data-notes="${encodeURIComponent(j.notes||'')}" class="text-xs text-gray-400 hover:text-indigo-600">edit notes</button>
+          <button data-action="edit-notes" data-job="${j.id}" data-notes="${encodeURIComponent(j.notes||'')}" class="text-xs text-gray-400 hover:text-[#7a3620]">edit notes</button>
         </div>
       </div>
     </div>`).join('')}
@@ -862,7 +897,7 @@ function renderPrep(c) {
       </div>
       <div class="card p-6">
         <h3 class="font-bold mb-3">Tailored questions</h3>
-        <ul class="space-y-2 text-sm text-gray-700">${qs.scenarios.map(q=>`<li class="flex gap-2"><span class="text-indigo-600 font-bold shrink-0">Q.</span>${q}</li>`).join('')}</ul>
+        <ul class="space-y-2 text-sm text-gray-700">${qs.scenarios.map(q=>`<li class="flex gap-2"><span class="text-[#a64c2c] font-bold shrink-0">Q.</span>${q}</li>`).join('')}</ul>
         <h4 class="font-bold mt-5 mb-2">Common questions</h4>
         <ul class="space-y-1 text-sm text-gray-700">${qs.common.map(q=>`<li>• ${q}</li>`).join('')}</ul>
       </div>
@@ -870,12 +905,12 @@ function renderPrep(c) {
     <div class="space-y-5">
       <div class="card p-6">
         <h3 class="font-bold mb-3">Coaching tips</h3>
-        <ul class="space-y-2 text-sm">${qs.tips.map(t=>`<li class="flex gap-2"><span class="text-cyan-600 shrink-0">💡</span>${t}</li>`).join('')}</ul>
+        <ul class="space-y-2 text-sm">${qs.tips.map(t=>`<li class="flex gap-2"><span class="text-[#6d7a52] shrink-0">💡</span>${t}</li>`).join('')}</ul>
       </div>
       <div class="card p-6 brand-grad text-white">
         <h3 class="font-bold">Practice with your coach</h3>
         <p class="text-sm opacity-90 mt-1">Book a live mock interview session tailored to a specific role.</p>
-        <a href="mailto:${CONFIG.COACH_EMAILS[0]}?subject=Mock interview request" class="inline-block mt-3 bg-white text-indigo-700 font-semibold rounded-xl px-4 py-2 text-sm">Request session</a>
+        <a href="mailto:${CONFIG.COACH_EMAILS[0]}?subject=Mock interview request" class="inline-block mt-3 bg-white text-[#7a3620] font-semibold rounded-xl px-4 py-2 text-sm">Request session</a>
       </div>
     </div>
   </div>`;
@@ -899,11 +934,11 @@ function renderVoice() {
           </div>
         </div>
         ${!supported?`<div class="p-4 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-900 mb-4">⚠️ Open in <b>Chrome</b> or <b>Edge</b> for voice features. Allow mic access when prompted.</div>`:''}
-        <div class="rounded-2xl bg-gradient-to-br from-indigo-50 via-white to-cyan-50 border border-indigo-100 p-6">
+        <div class="rounded-2xl bg-gradient-to-br from-[#f5ede0] via-[#fffdf8] to-[#ecece0] border border-[#e9dfcc] p-6">
           <div class="flex items-start gap-4">
             <div class="w-14 h-14 brand-grad rounded-full flex items-center justify-center text-2xl shrink-0 shadow" id="coachAvatar">🎙️</div>
             <div class="flex-1 min-w-0">
-              <div class="text-xs uppercase tracking-wide text-indigo-600 font-semibold">Careers by Design · ${script.title}</div>
+              <div class="text-xs uppercase tracking-wide text-[#a64c2c] font-semibold">Careers by Design · ${script.title}</div>
               <div id="coachSpeech" class="mt-1 text-gray-900 leading-relaxed text-sm">${session.started?(script.questions[session.idx]?.q||'Session complete — great work!'):(script.intro)}</div>
             </div>
           </div>
@@ -926,7 +961,7 @@ function renderVoice() {
       <div class="card p-6">
         <h3 class="font-bold mb-4">Session transcript & coaching</h3>
         <div class="space-y-5">
-          ${session.transcripts.map((t,i)=>`<div><div class="text-xs font-semibold uppercase text-gray-500">Q${i+1}</div><div class="text-sm text-gray-800 mt-1">${t.question}</div><div class="text-xs font-semibold uppercase text-gray-500 mt-3">You said</div><div class="text-sm bg-gray-50 rounded-xl p-3 border border-gray-100 mt-1">"${t.answer}"</div><div class="text-xs font-semibold uppercase text-indigo-600 mt-3">💡 Coaching</div><div class="text-sm mt-1">${session.feedback[i]||''}</div></div>`).join('<hr class="border-gray-100"/>')}
+          ${session.transcripts.map((t,i)=>`<div><div class="text-xs font-semibold uppercase text-gray-500">Q${i+1}</div><div class="text-sm text-gray-800 mt-1">${t.question}</div><div class="text-xs font-semibold uppercase text-gray-500 mt-3">You said</div><div class="text-sm bg-gray-50 rounded-xl p-3 border border-gray-100 mt-1">"${t.answer}"</div><div class="text-xs font-semibold uppercase text-[#a64c2c] mt-3">💡 Coaching</div><div class="text-sm mt-1">${session.feedback[i]||''}</div></div>`).join('<hr class="border-gray-100"/>')}
         </div>
       </div>`:''}
     </div>
@@ -935,18 +970,18 @@ function renderVoice() {
         <h3 class="font-bold mb-3">${mode==='interview'?'Interview tips':'Negotiation tactics'}</h3>
         <ul class="space-y-2 text-sm text-gray-700">
           ${mode==='interview'?`
-            <li class="flex gap-2"><span class="text-cyan-600 shrink-0">•</span>Use <b>STAR</b>: Situation, Task, Action, Result.</li>
-            <li class="flex gap-2"><span class="text-cyan-600 shrink-0">•</span>Quantify outcomes — revenue, %, users, time.</li>
-            <li class="flex gap-2"><span class="text-cyan-600 shrink-0">•</span>Keep answers to 60–90 seconds.</li>
-            <li class="flex gap-2"><span class="text-cyan-600 shrink-0">•</span>End every story with what you learned.</li>
-            <li class="flex gap-2"><span class="text-cyan-600 shrink-0">•</span>Prepare 3 smart questions for the hiring manager.</li>
+            <li class="flex gap-2"><span class="text-[#6d7a52] shrink-0">•</span>Use <b>STAR</b>: Situation, Task, Action, Result.</li>
+            <li class="flex gap-2"><span class="text-[#6d7a52] shrink-0">•</span>Quantify outcomes — revenue, %, users, time.</li>
+            <li class="flex gap-2"><span class="text-[#6d7a52] shrink-0">•</span>Keep answers to 60–90 seconds.</li>
+            <li class="flex gap-2"><span class="text-[#6d7a52] shrink-0">•</span>End every story with what you learned.</li>
+            <li class="flex gap-2"><span class="text-[#6d7a52] shrink-0">•</span>Prepare 3 smart questions for the hiring manager.</li>
           `:`
-            <li class="flex gap-2"><span class="text-cyan-600 shrink-0">•</span>Never name a number first — ask for their range.</li>
-            <li class="flex gap-2"><span class="text-cyan-600 shrink-0">•</span>After countering, <b>stay silent</b>.</li>
-            <li class="flex gap-2"><span class="text-cyan-600 shrink-0">•</span>Negotiate <b>total comp</b>: base, bonus, equity, PTO.</li>
-            <li class="flex gap-2"><span class="text-cyan-600 shrink-0">•</span>Cite market data: "Based on ranges I'm seeing…"</li>
-            <li class="flex gap-2"><span class="text-cyan-600 shrink-0">•</span>Get everything <b>in writing</b> before accepting verbally.</li>
-            <li class="flex gap-2"><span class="text-cyan-600 shrink-0">•</span>Know your BATNA — your walk-away alternative.</li>
+            <li class="flex gap-2"><span class="text-[#6d7a52] shrink-0">•</span>Never name a number first — ask for their range.</li>
+            <li class="flex gap-2"><span class="text-[#6d7a52] shrink-0">•</span>After countering, <b>stay silent</b>.</li>
+            <li class="flex gap-2"><span class="text-[#6d7a52] shrink-0">•</span>Negotiate <b>total comp</b>: base, bonus, equity, PTO.</li>
+            <li class="flex gap-2"><span class="text-[#6d7a52] shrink-0">•</span>Cite market data: "Based on ranges I'm seeing…"</li>
+            <li class="flex gap-2"><span class="text-[#6d7a52] shrink-0">•</span>Get everything <b>in writing</b> before accepting verbally.</li>
+            <li class="flex gap-2"><span class="text-[#6d7a52] shrink-0">•</span>Know your BATNA — your walk-away alternative.</li>
           `}
         </ul>
       </div>
@@ -966,7 +1001,7 @@ function renderDashboard(c) {
   const pct = prep.total?Math.round(prep.completed/prep.total*100):0;
   return `
   <div class="grid sm:grid-cols-4 gap-4 mb-6">
-    ${[['Tracking',jobs.length,'bg-white border-gray-200'],['Applied',counts.applied,'bg-indigo-50 border-indigo-100 text-indigo-900'],['Interviewing',counts.interviewing,'bg-amber-50 border-amber-100 text-amber-900'],['Offers',counts.offer,'bg-emerald-50 border-emerald-100 text-emerald-900']].map(([l,v,cls])=>`<div class="card p-5 ${cls}"><div class="text-xs uppercase tracking-wide opacity-70 font-semibold">${l}</div><div class="text-3xl font-bold mt-1">${v||0}</div></div>`).join('')}
+    ${[['Tracking',jobs.length,'bg-white border-gray-200'],['Applied',counts.applied,'bg-[#f5ede0] border-[#e9dfcc] text-[#2d1c10]'],['Interviewing',counts.interviewing,'bg-amber-50 border-amber-100 text-amber-900'],['Offers',counts.offer,'bg-emerald-50 border-emerald-100 text-emerald-900']].map(([l,v,cls])=>`<div class="card p-5 ${cls}"><div class="text-xs uppercase tracking-wide opacity-70 font-semibold">${l}</div><div class="text-3xl font-bold mt-1">${v||0}</div></div>`).join('')}
   </div>
   <div class="grid md:grid-cols-3 gap-6">
     <div class="md:col-span-2 card p-6">
@@ -1008,7 +1043,7 @@ function renderCoach() {
     <button data-action="refresh" class="btn btn-secondary">↻ Refresh</button>
   </div>
   <div class="grid sm:grid-cols-4 gap-4 mb-6">
-    ${[['Clients',clients.length,'bg-white border-gray-200'],['Jobs tracked',totalJobs,'bg-indigo-50 border-indigo-100 text-indigo-900'],['Interviewing',activeInterviews,'bg-amber-50 border-amber-100 text-amber-900'],['Alerts',totalAlerts,'bg-red-50 border-red-100 text-red-900']].map(([l,v,cls])=>`<div class="card p-5 ${cls}"><div class="text-xs uppercase tracking-wide opacity-70 font-semibold">${l}</div><div class="text-3xl font-bold mt-1">${v||0}</div></div>`).join('')}
+    ${[['Clients',clients.length,'bg-white border-gray-200'],['Jobs tracked',totalJobs,'bg-[#f5ede0] border-[#e9dfcc] text-[#2d1c10]'],['Interviewing',activeInterviews,'bg-amber-50 border-amber-100 text-amber-900'],['Alerts',totalAlerts,'bg-red-50 border-red-100 text-red-900']].map(([l,v,cls])=>`<div class="card p-5 ${cls}"><div class="text-xs uppercase tracking-wide opacity-70 font-semibold">${l}</div><div class="text-3xl font-bold mt-1">${v||0}</div></div>`).join('')}
   </div>
   <div class="card overflow-hidden">
     <div class="p-4 border-b border-gray-200 font-bold">My clients</div>
@@ -1086,7 +1121,7 @@ function renderCoachDrawer(c) {
 // ── SETUP WIZARD  ─────────────────────────────────────────────────────
 function renderSetupWizard() {
   return `
-  <div class="min-h-screen flex items-center justify-center px-4 py-12" style="background:#f7fafd">
+  <div class="min-h-screen flex items-center justify-center px-4 py-12" style="background:var(--cream)">
     <div class="card p-8 max-w-xl w-full">
       <div class="flex items-center gap-3 mb-6">
         <div class="w-10 h-10 brand-grad rounded-xl flex items-center justify-center">${compassSVG(20)}</div>
@@ -1094,12 +1129,12 @@ function renderSetupWizard() {
       </div>
       <p class="text-sm text-gray-600 mb-6">Open this file in a text editor, find the <code class="bg-gray-100 px-1 rounded">CONFIG</code> block at the top, and fill in the four values below. Full instructions are in <b>SETUP_GUIDE.md</b>.</p>
       <ol class="setup-list space-y-4">
-        <li class="setup-step flex gap-3 items-start"><div class="flex-1"><b>Google OAuth Client ID</b><br><code class="text-xs text-indigo-600">CLIENT_ID: 'YOUR_GOOGLE_OAUTH_CLIENT_ID…'</code><p class="text-xs text-gray-500 mt-1">Google Cloud Console → APIs & Services → Credentials → Create OAuth 2.0 Client ID (Web application)</p></div></li>
-        <li class="setup-step flex gap-3 items-start"><div class="flex-1"><b>Google Sheet ID</b><br><code class="text-xs text-indigo-600">SHEET_ID: 'YOUR_GOOGLE_SHEET_ID'</code><p class="text-xs text-gray-500 mt-1">Create a Google Sheet with tabs: Clients, Jobs, PrepSessions. The ID is in the URL: docs.google.com/spreadsheets/d/<b>[ID]</b>/edit</p></div></li>
-        <li class="setup-step flex gap-3 items-start"><div class="flex-1"><b>Apps Script proxy URL</b><br><code class="text-xs text-indigo-600">APPS_SCRIPT_URL: 'YOUR_APPS_SCRIPT_DEPLOYED_URL'</code><p class="text-xs text-gray-500 mt-1">Deploy CareersProxy.gs as a Web App (anyone, even anonymous). Paste the deployment URL here.</p></div></li>
-        <li class="setup-step flex gap-3 items-start"><div class="flex-1"><b>Your coach email</b><br><code class="text-xs text-indigo-600">COACH_EMAILS: ['your@email.com']</code><p class="text-xs text-gray-500 mt-1">The email you sign in with. This unlocks the coach view automatically.</p></div></li>
+        <li class="setup-step flex gap-3 items-start"><div class="flex-1"><b>Google OAuth Client ID</b><br><code class="text-xs text-[#a64c2c]">CLIENT_ID: 'YOUR_GOOGLE_OAUTH_CLIENT_ID…'</code><p class="text-xs text-gray-500 mt-1">Google Cloud Console → APIs & Services → Credentials → Create OAuth 2.0 Client ID (Web application)</p></div></li>
+        <li class="setup-step flex gap-3 items-start"><div class="flex-1"><b>Google Sheet ID</b><br><code class="text-xs text-[#a64c2c]">SHEET_ID: 'YOUR_GOOGLE_SHEET_ID'</code><p class="text-xs text-gray-500 mt-1">Create a Google Sheet with tabs: Clients, Jobs, PrepSessions. The ID is in the URL: docs.google.com/spreadsheets/d/<b>[ID]</b>/edit</p></div></li>
+        <li class="setup-step flex gap-3 items-start"><div class="flex-1"><b>Apps Script proxy URL</b><br><code class="text-xs text-[#a64c2c]">APPS_SCRIPT_URL: 'YOUR_APPS_SCRIPT_DEPLOYED_URL'</code><p class="text-xs text-gray-500 mt-1">Deploy CareersProxy.gs as a Web App (anyone, even anonymous). Paste the deployment URL here.</p></div></li>
+        <li class="setup-step flex gap-3 items-start"><div class="flex-1"><b>Your coach email</b><br><code class="text-xs text-[#a64c2c]">COACH_EMAILS: ['your@email.com']</code><p class="text-xs text-gray-500 mt-1">The email you sign in with. This unlocks the coach view automatically.</p></div></li>
       </ol>
-      <div class="mt-6 p-4 bg-indigo-50 rounded-xl text-sm text-indigo-900">📄 See <b>SETUP_GUIDE.md</b> for the complete step-by-step guide including the GoDaddy subdomain setup.</div>
+      <div class="mt-6 p-4 bg-[#f5ede0] rounded-xl text-sm text-[#2d1c10]">📄 See <b>SETUP_GUIDE.md</b> for the complete step-by-step guide including the GoDaddy subdomain setup.</div>
     </div>
   </div>`;
 }
@@ -1209,7 +1244,7 @@ async function handleAction(e) {
       const btn = document.getElementById('searchBtn');
       const status = document.getElementById('searchStatus');
       if (btn) { btn.disabled=true; btn.innerHTML='<span class="spinner"></span> Scanning…'; }
-      if (status) status.innerHTML=`<div class="card p-4 mb-4 bg-indigo-50 border-indigo-100"><div class="flex items-center gap-3 text-indigo-900"><span class="loading-dots"><span></span><span></span><span></span></span><span>Scanning LinkedIn, Wellfound, Greenhouse…</span></div></div>`;
+      if (status) status.innerHTML=`<div class="card p-4 mb-4 bg-[#f5ede0] border-[#e9dfcc]"><div class="flex items-center gap-3 text-[#2d1c10]"><span class="loading-dots"><span></span><span></span><span></span></span><span>Scanning LinkedIn, Wellfound, Greenhouse…</span></div></div>`;
       setTimeout(async () => {
         const fresh = mockJobSearch(c.questionnaire||{});
         const existingIds = new Set((c.jobs||[]).map(j=>j.id));
