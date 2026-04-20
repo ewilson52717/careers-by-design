@@ -923,13 +923,27 @@ function compassSVG(size) {
 function renderClientTabs() {
   const tab = state.tab || 'intake';
   const c = state.client;
-  const tabs = [['intake','Intake'],['profile','My Profile'],['jobs','Job Search'],['prep','Interview Prep'],['voice','🎙️ Voice Coach'],['dashboard','Dashboard']];
+  const tabs = [
+    ['intake','Intake'],
+    ['profile','My Profile'],
+    ['assessment','Assessment'],
+    ['jobs','Job Search'],
+    ['prep','Interview Prep'],
+    ['voice','🎙️ Voice Coach'],
+    ['dashboard','Dashboard'],
+  ];
   return `
     <div class="flex gap-1 mb-6 overflow-x-auto pb-1">
       ${tabs.map(([k,l]) => `<button data-action="set-tab" data-tab="${k}" class="nav-btn ${tab===k?'active':''}">${l}</button>`).join('')}
     </div>
     <div class="slide-in">
-      ${tab==='intake'?renderIntake(c):tab==='profile'?renderProfile(c):tab==='jobs'?renderJobs(c):tab==='prep'?renderPrep(c):tab==='voice'?renderVoice():renderDashboard(c)}
+      ${tab==='intake'?renderIntake(c)
+        :tab==='profile'?renderProfile(c)
+        :tab==='assessment'?renderAssessment(c)
+        :tab==='jobs'?renderJobs(c)
+        :tab==='prep'?renderPrep(c)
+        :tab==='voice'?renderVoice()
+        :renderDashboard(c)}
     </div>`;
 }
 
@@ -1020,6 +1034,204 @@ function renderIntake(c) {
   </div>`;
 }
 
+// ── BIG FIVE ASSESSMENT  ──────────────────────────────────────────────
+// 25 IPIP-style questions (5 per trait) framed for a work context. Scoring
+// is per trait on a 0-100 scale: average the Likert responses (1-5), flip
+// reverse-coded items, then linearly map to 0-100.
+//
+// Traits:
+//   O = Openness to experience     (curiosity, creativity)
+//   C = Conscientiousness          (discipline, organization)
+//   E = Extraversion               (energy from others, assertiveness)
+//   A = Agreeableness              (warmth, cooperation)
+//   N = Neuroticism                (emotional reactivity — inverted in UX)
+
+const BIG_FIVE_QUESTIONS = [
+  // Openness
+  { id:'o1', trait:'O', text:'I enjoy exploring unfamiliar ideas at work.',            reverse:false },
+  { id:'o2', trait:'O', text:'I prefer routine tasks over novel ones.',                reverse:true  },
+  { id:'o3', trait:'O', text:'I come up with creative solutions to problems.',         reverse:false },
+  { id:'o4', trait:'O', text:'I don\'t enjoy experimenting with new methods.',         reverse:true  },
+  { id:'o5', trait:'O', text:'I\'m drawn to work that challenges my assumptions.',     reverse:false },
+  // Conscientiousness
+  { id:'c1', trait:'C', text:'I follow through on commitments without being reminded.',reverse:false },
+  { id:'c2', trait:'C', text:'I often leave tasks unfinished.',                        reverse:true  },
+  { id:'c3', trait:'C', text:'I pay close attention to details in my work.',           reverse:false },
+  { id:'c4', trait:'C', text:'My workspace tends to be cluttered or disorganized.',    reverse:true  },
+  { id:'c5', trait:'C', text:'I plan ahead before starting a project.',                reverse:false },
+  // Extraversion
+  { id:'e1', trait:'E', text:'I feel energized by group discussions.',                 reverse:false },
+  { id:'e2', trait:'E', text:'I prefer working alone over collaborating in groups.',   reverse:true  },
+  { id:'e3', trait:'E', text:'I speak up easily in meetings.',                         reverse:false },
+  { id:'e4', trait:'E', text:'I stay quiet unless directly asked.',                    reverse:true  },
+  { id:'e5', trait:'E', text:'I enjoy meeting new colleagues and building networks.',  reverse:false },
+  // Agreeableness
+  { id:'a1', trait:'A', text:'I take time to understand other people\'s perspectives.',reverse:false },
+  { id:'a2', trait:'A', text:'I find it hard to care about other people\'s problems.', reverse:true  },
+  { id:'a3', trait:'A', text:'I seek win-win outcomes in disagreements.',              reverse:false },
+  { id:'a4', trait:'A', text:'I enjoy debate and direct disagreement.',                reverse:true  },
+  { id:'a5', trait:'A', text:'I\'m willing to compromise to keep a team aligned.',     reverse:false },
+  // Neuroticism (we frame the results as "stability" — high score = steady)
+  { id:'n1', trait:'N', text:'Tight deadlines stress me out more than they should.',   reverse:false },
+  { id:'n2', trait:'N', text:'I stay calm when things go sideways at work.',           reverse:true  },
+  { id:'n3', trait:'N', text:'I ruminate on small mistakes after the workday ends.',   reverse:false },
+  { id:'n4', trait:'N', text:'I bounce back quickly from setbacks.',                   reverse:true  },
+  { id:'n5', trait:'N', text:'I frequently feel anxious about work responsibilities.', reverse:false },
+];
+
+const LIKERT_OPTIONS = [
+  { v:1, label:'Strongly disagree' },
+  { v:2, label:'Disagree' },
+  { v:3, label:'Neutral' },
+  { v:4, label:'Agree' },
+  { v:5, label:'Strongly agree' },
+];
+
+const TRAIT_META = {
+  O: { name:'Openness',            high:'Exploratory & curious',       low:'Pragmatic & conventional',   desc:'Drawn to novel ideas vs. tried-and-true approaches.' },
+  C: { name:'Conscientiousness',   high:'Organized & disciplined',     low:'Flexible & improvisational', desc:'Planful and precise vs. adaptive and spontaneous.' },
+  E: { name:'Extraversion',        high:'Energized by people',         low:'Energized by focus',         desc:'Where your energy comes from in a work day.' },
+  A: { name:'Agreeableness',       high:'Collaborative & warm',        low:'Direct & candid',            desc:'How you approach conflict and cooperation.' },
+  N: { name:'Emotional Stability', high:'Steady under pressure',       low:'Sensitive to stress',        desc:'How you respond to workplace stressors. (Higher = more steady — we flip this from clinical Neuroticism scoring.)' },
+};
+
+function bigFiveState() {
+  return (state.assessment ||= { idx: 0, answers: {} });
+}
+
+// Takes { questionId: 1..5 } and produces { O: 0..100, C: ..., E: ..., A: ..., N: ... }.
+// For Emotional Stability we invert the raw Neuroticism score so "higher = more stable."
+function scoreBigFive(answers) {
+  const totals = { O:0, C:0, E:0, A:0, N:0 };
+  const counts = { O:0, C:0, E:0, A:0, N:0 };
+  BIG_FIVE_QUESTIONS.forEach(q => {
+    const raw = answers[q.id];
+    if (!raw) return;
+    const val = q.reverse ? (6 - raw) : raw; // flip 1→5, 2→4, etc.
+    totals[q.trait] += val;
+    counts[q.trait] += 1;
+  });
+  const scale = trait => {
+    if (!counts[trait]) return 0;
+    const avg = totals[trait] / counts[trait]; // 1..5
+    return Math.round(((avg - 1) / 4) * 100);  // → 0..100
+  };
+  const raw = { O: scale('O'), C: scale('C'), E: scale('E'), A: scale('A'), N: scale('N') };
+  // Flip N so "higher = more emotionally stable" in display/LLM prompt
+  raw.N = 100 - raw.N;
+  return raw;
+}
+
+function renderAssessment(c) {
+  const saved = c.questionnaire?.bigFive;
+  const asmt = bigFiveState();
+
+  // If we already have saved scores AND the user hasn't started a retake,
+  // show the results view.
+  if (saved && Object.keys(asmt.answers).length === 0) {
+    return renderAssessmentResults(saved, true);
+  }
+
+  // Fresh start
+  if (Object.keys(asmt.answers).length === 0 && asmt.idx === 0 && !asmt._started) {
+    return renderAssessmentIntro(saved);
+  }
+
+  const total = BIG_FIVE_QUESTIONS.length;
+  const idx   = Math.min(asmt.idx, total - 1);
+  const q     = BIG_FIVE_QUESTIONS[idx];
+  const pickedVal = asmt.answers[q.id];
+  const pct   = Math.round(((idx) / total) * 100);
+  const answered = Object.keys(asmt.answers).length;
+  const allAnswered = answered === total;
+
+  return `
+  <div class="max-w-2xl mx-auto">
+    <div class="card p-6">
+      <div class="flex items-center justify-between text-xs text-gray-500 mb-2">
+        <span>Question ${idx + 1} of ${total}</span>
+        <span>${answered} answered</span>
+      </div>
+      <div class="progress-bar mb-6"><div class="progress-fill" style="width:${pct}%"></div></div>
+
+      <div class="text-xs uppercase tracking-wide font-semibold text-[#a64c2c] mb-2">${TRAIT_META[q.trait].name}</div>
+      <h2 class="font-headline text-2xl leading-snug mb-6">${q.text}</h2>
+
+      <div class="space-y-2">
+        ${LIKERT_OPTIONS.map(opt => `
+          <button data-action="answer-question" data-question="${q.id}" data-value="${opt.v}"
+            class="w-full text-left px-4 py-3 rounded-xl border transition ${pickedVal === opt.v ? 'bg-[#f5ede0] border-[#a64c2c] text-[#7a3620] font-semibold' : 'bg-[#fffdf8] border-[#e9dfcc] hover:border-[#a64c2c]'}">
+            ${opt.label}
+          </button>`).join('')}
+      </div>
+
+      <div class="flex items-center justify-between mt-6">
+        <button data-action="prev-question" class="btn btn-secondary ${idx === 0 ? 'opacity-40 pointer-events-none' : ''}">← Back</button>
+        ${idx < total - 1
+          ? `<button data-action="next-question" class="btn btn-primary ${pickedVal ? '' : 'opacity-40 pointer-events-none'}">Next →</button>`
+          : `<button data-action="submit-assessment" class="btn btn-primary ${allAnswered ? '' : 'opacity-40 pointer-events-none'}">See results ✨</button>`
+        }
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderAssessmentIntro(saved) {
+  return `
+  <div class="max-w-2xl mx-auto">
+    <div class="card p-8 text-center">
+      <div class="text-4xl mb-3">🧭</div>
+      <h2 class="font-headline text-3xl mb-2">${saved ? 'Retake the' : 'Discover your'} work-style assessment</h2>
+      <p class="text-gray-600 mb-6 max-w-md mx-auto">25 quick questions across five dimensions. We use your answers to recommend roles that fit how you actually work. Takes about 4 minutes.</p>
+      <div class="grid grid-cols-5 gap-2 max-w-lg mx-auto mb-6 text-xs">
+        ${Object.entries(TRAIT_META).map(([k,m]) => `
+          <div class="p-2 rounded-lg bg-[#fffdf8] border border-[#e9dfcc]">
+            <div class="font-headline font-bold text-[#7a3620] mb-0.5">${m.name}</div>
+          </div>`).join('')}
+      </div>
+      <button data-action="start-assessment" class="btn btn-primary">${saved ? 'Start over →' : 'Begin →'}</button>
+      <p class="text-xs text-gray-400 mt-4">Based on the Big Five (IPIP) framework — scientifically validated across decades of research.</p>
+    </div>
+  </div>`;
+}
+
+function renderAssessmentResults(scores, canRetake) {
+  const order = ['O','C','E','A','N'];
+  return `
+  <div class="max-w-2xl mx-auto space-y-6">
+    <div class="card p-6">
+      <h2 class="font-headline text-2xl mb-1">Your work-style profile</h2>
+      <p class="text-sm text-gray-500 mb-5">Each trait runs 0-100. There are no "better" scores — each pattern fits different roles and environments.</p>
+      <div class="space-y-5">
+        ${order.map(k => {
+          const s = scores[k] ?? 0;
+          const m = TRAIT_META[k];
+          const leaning = s >= 60 ? m.high : s <= 40 ? m.low : 'Balanced';
+          return `
+          <div>
+            <div class="flex items-baseline justify-between mb-1">
+              <div><span class="font-headline font-bold text-[#1a1410]">${m.name}</span> <span class="text-xs text-gray-500 ml-1">— ${m.desc}</span></div>
+              <span class="font-headline font-bold text-lg">${s}<span class="text-sm text-gray-400">/100</span></span>
+            </div>
+            <div class="progress-bar" style="height:10px;"><div class="progress-fill" style="width:${s}%"></div></div>
+            <div class="mt-1 text-xs text-[#7a3620] font-semibold">${leaning}</div>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>
+
+    <div class="card p-6 text-center">
+      <div class="text-3xl mb-2">✨</div>
+      <h3 class="font-headline text-xl mb-1">Factor this into your career analysis</h3>
+      <p class="text-sm text-gray-600 mb-4">Add these results to your profile and re-run the AI analysis. Role recommendations will now account for your work style, not just your resume.</p>
+      <div class="flex gap-2 justify-center">
+        <button data-action="analyze-with-assessment" class="btn btn-primary">Re-analyze with assessment ✨</button>
+        ${canRetake ? `<button data-action="start-assessment" class="btn btn-secondary">Retake</button>` : ''}
+      </div>
+    </div>
+  </div>`;
+}
+
 // ── PROFILE  ───────────────────────────────────────────────────────────
 // Splits "Jane Smith Doe" into { first: "Jane", last: "Smith Doe" } so
 // the client can control exactly how their name appears on applications.
@@ -1104,6 +1316,14 @@ function renderProfile(c) {
 // on reload is fine — it's just UX state.
 function jobUI(id) { return (state.jobUI ||= {}) [id] ||= { details: false, apply: false }; }
 function toggleJobUI(id, key) { const s = jobUI(id); s[key] = !s[key]; render(); }
+
+// Stable signature for deduping a job across searches. Each fresh search
+// generates new random IDs, so we can't use job.id — we fall back to the
+// URL (unique per posting) or a normalized title+company+location hash.
+function jobSignature(j) {
+  if (j?.url) return ('u:' + j.url).trim().toLowerCase();
+  return ('t:' + (j?.title || '') + '|' + (j?.company || '') + '|' + (j?.location || '')).trim().toLowerCase();
+}
 
 // Clearbit's free logo endpoint. Falls back to a solid initial tile if the
 // lookup 404s (which happens often for small/newer companies).
@@ -1642,6 +1862,69 @@ async function handleAction(e) {
     case 'set-tab': setState({ tab: el.dataset.tab }); break;
     case 'refresh': await loadAndBoot(); break;
 
+    case 'start-assessment': {
+      state.assessment = { idx: 0, answers: {}, _started: true };
+      render();
+      break; }
+
+    case 'answer-question': {
+      const qid = el.dataset.question;
+      const val = parseInt(el.dataset.value, 10);
+      if (!qid || !val) break;
+      const asmt = bigFiveState();
+      asmt.answers[qid] = val;
+      // Auto-advance if not on the last question — keeps the flow snappy
+      if (asmt.idx < BIG_FIVE_QUESTIONS.length - 1) asmt.idx += 1;
+      render();
+      break; }
+
+    case 'prev-question': {
+      const asmt = bigFiveState();
+      if (asmt.idx > 0) asmt.idx -= 1;
+      render();
+      break; }
+
+    case 'next-question': {
+      const asmt = bigFiveState();
+      if (asmt.idx < BIG_FIVE_QUESTIONS.length - 1) asmt.idx += 1;
+      render();
+      break; }
+
+    case 'submit-assessment': {
+      const asmt = bigFiveState();
+      if (Object.keys(asmt.answers).length < BIG_FIVE_QUESTIONS.length) {
+        showToast('Answer every question first', 'red');
+        break;
+      }
+      const scores = scoreBigFive(asmt.answers);
+      // Save to the questionnaire so it persists and flows into future analyses
+      await saveClientProfile({
+        questionnaire: { ...(c.questionnaire || {}), bigFive: scores, bigFiveAt: new Date().toISOString() },
+      });
+      // Reset the transient quiz state so the Results view renders from saved data
+      state.assessment = { idx: 0, answers: {} };
+      render();
+      break; }
+
+    case 'analyze-with-assessment': {
+      if (!c.questionnaire?.bigFive) { showToast('Take the assessment first', 'red'); break; }
+      el.disabled = true; el.innerHTML = '<span class="spinner"></span> Re-analyzing with Claude…';
+      try {
+        const resp = await scriptCall({
+          action: 'analyze_profile',
+          email: viewedEmail(),
+          questionnaire: c.questionnaire || {},
+        });
+        const profile = resp.configured && resp.profile ? resp.profile : mockAnalyzeProfile(c.questionnaire || {});
+        if (!resp.configured) showToast('Using sample analysis — set ANTHROPIC_API_KEY for real output', 'red');
+        await saveClientProfile({ profile });
+        setState({ tab: 'profile' });
+      } catch (e) {
+        console.error(e);
+        showToast('Analysis failed — ' + (e.message || 'see console'), 'red');
+      }
+      break; }
+
     case 'save-display-name': {
       const first = document.getElementById('display-first-name')?.value?.trim() || '';
       const last  = document.getElementById('display-last-name')?.value?.trim() || '';
@@ -1702,15 +1985,25 @@ async function handleAction(e) {
         const resp = await scriptCall({ action: 'search_jobs', email: viewedEmail(), questionnaire: c.questionnaire || {} });
         let fresh;
         if (resp.configured && Array.isArray(resp.jobs)) {
-          // Stamp clientEmail on real results so they save under the right row
           fresh = resp.jobs.map(j => ({ ...j, clientEmail: viewedEmail() }));
         } else {
           fresh = mockJobSearch(c.questionnaire || {});
           showToast('Using sample jobs — set RAPIDAPI_KEY for live results', 'red');
         }
-        const existingIds = new Set((c.jobs || []).map(j => j.id));
-        const newJobs = fresh.filter(j => !existingIds.has(j.id));
+        // Stable dedup signature. Each search gets fresh random IDs, so we
+        // can't use job.id — use the URL (unique per posting) or a
+        // normalized title+company+location hash as a fallback.
+        const existingSigs = new Set((c.jobs || []).map(jobSignature));
+        const newJobs = fresh.filter(j => !existingSigs.has(jobSignature(j)));
+        const skipped = fresh.length - newJobs.length;
         await addJobs(newJobs);
+        if (newJobs.length === 0 && skipped > 0) {
+          showToast(`No new jobs — all ${skipped} were already in your list`);
+        } else if (skipped > 0) {
+          showToast(`Added ${newJobs.length} new · skipped ${skipped} duplicate${skipped>1?'s':''}`);
+        } else if (newJobs.length > 0) {
+          showToast(`Added ${newJobs.length} new job${newJobs.length>1?'s':''}`);
+        }
       } catch (e) {
         console.error(e);
         showToast('Job search failed — ' + (e.message || 'see console'), 'red');
