@@ -84,6 +84,17 @@
     ol.setup-list { counter-reset:step; list-style:none; padding:0; }
     /* subtle text-selection */
     ::selection { background: var(--parchment); color: var(--ink); }
+    /* ── Swipe deck ── */
+    .swipe-deck-back { position:fixed; inset:0; z-index:50; background:linear-gradient(180deg, rgba(17,24,39,.85), rgba(79,70,229,.75)); display:flex; flex-direction:column; align-items:center; justify-content:flex-start; padding:24px 16px; overflow:hidden; }
+    .swipe-stack { position:relative; width:100%; max-width:460px; height:560px; }
+    .swipe-card { position:absolute; inset:0; background:white; border-radius:20px; box-shadow:0 20px 40px rgba(0,0,0,.25); overflow:hidden; display:flex; flex-direction:column; touch-action:none; user-select:none; }
+    .swipe-card.drag { transition:none; cursor:grabbing; }
+    .swipe-card.rest { transition:transform .28s cubic-bezier(.2,.8,.2,1), opacity .28s; cursor:grab; }
+    .swipe-card.gone-right { transform:translate(140%,-40px) rotate(22deg); opacity:0; }
+    .swipe-card.gone-left  { transform:translate(-140%,-40px) rotate(-22deg); opacity:0; }
+    .swipe-stamp { position:absolute; top:36px; padding:8px 16px; border:3px solid currentColor; border-radius:8px; font-weight:900; font-size:28px; letter-spacing:2px; text-transform:uppercase; opacity:0; transition:opacity .1s; pointer-events:none; }
+    .swipe-stamp.like { right:24px; color:#10b981; transform:rotate(12deg); }
+    .swipe-stamp.nope { left:24px;  color:#ef4444; transform:rotate(-12deg); }
     /* link default */
     a { color: var(--ember); }
     a:hover { color: var(--ember-2); }
@@ -811,10 +822,10 @@ function voiceMicToggle() {
 function render() {
   document.getElementById('app').innerHTML = buildPage();
   bindEvents();
-  // Wire up any currency-formatted inputs that just got rendered. Safe to
-  // call unconditionally — bindCurrencyInput no-ops when the element is
-  // absent or already bound.
   bindCurrencyInput('q-salaryFloor');
+  // If the swipe deck is open, attach pointer-drag listeners to the top card.
+  // No-op when the deck isn't active.
+  wireSwipeGestures();
 }
 
 function buildPage() {
@@ -822,8 +833,8 @@ function buildPage() {
   switch (state.page) {
     case 'login':    return renderLogin();
     case 'register': return renderRegister();
-    case 'client':   return renderHeader() + `<main class="max-w-6xl mx-auto px-4 py-8">${renderClientTabs()}</main>` + renderFooter();
-    case 'coach':    return renderHeader() + `<main class="max-w-7xl mx-auto px-4 py-8">${renderCoach()}</main>` + renderFooter();
+    case 'client':   return renderHeader() + `<main class="max-w-6xl mx-auto px-4 py-8">${renderClientTabs()}</main>` + renderFooter() + renderSwipeDeck();
+    case 'coach':    return renderHeader() + `<main class="max-w-7xl mx-auto px-4 py-8">${renderCoach()}</main>` + renderFooter() + renderSwipeDeck();
     case 'loading':  return renderLoadingScreen(state.loadingMsg);
     case 'error':    return `<div class="min-h-screen flex items-center justify-center p-8"><div class="card p-8 max-w-md text-center"><div class="text-4xl mb-3">⚠️</div><h2 class="font-bold text-gray-900">Something went wrong</h2><p class="text-sm text-gray-600 mt-2">${state.errorMsg || 'Unknown error'}</p><button onclick="location.reload()" class="btn btn-primary mt-4">Reload</button></div></div>`;
     default: return renderLogin();
@@ -1358,6 +1369,196 @@ function toggleJobUI(id, key) { const s = jobUI(id); s[key] = !s[key]; render();
 function jobsSelectState() {
   return (state.jobsSelect ||= { mode: false, selected: new Set() });
 }
+
+// ── SWIPE DECK  ────────────────────────────────────────────────────────
+// When a search returns new jobs, we don't auto-save them — we open a
+// Tinder-style swipe deck. The user reviews each card, swipes right to
+// keep or left to dismiss. Only kept jobs persist. Exiting mid-swipe still
+// saves everything liked so far.
+function openSwipeDeck(jobs) {
+  state.swipeDeck = { jobs, idx: 0, liked: [], active: true };
+  render();
+}
+
+function renderSwipeDeck() {
+  const d = state.swipeDeck;
+  if (!d?.active) return '';
+  const job = d.jobs[d.idx];
+  const remaining = d.jobs.length - d.idx;
+
+  if (!job) {
+    // All cards processed — finalize outside of render via rAF
+    requestAnimationFrame(() => finalizeSwipeDeck());
+    return `
+    <div class="swipe-deck-back">
+      <div class="text-white text-center">
+        <div class="text-4xl mb-3">✨</div>
+        <div class="font-headline text-2xl">All done — saving…</div>
+      </div>
+    </div>`;
+  }
+
+  // Stack: render the top card + up to 2 peeking behind for depth
+  const stack = d.jobs.slice(d.idx, d.idx + 3);
+  const stackHtml = stack.map((j, i) => {
+    // i=0 is the top card; i=1,2 are behind
+    const scale = 1 - i * 0.04;
+    const offset = i * 10;
+    const isTop = i === 0;
+    return `
+    <div class="swipe-card rest" data-swipe-card="${i}" data-job-id="${j.id}"
+         style="z-index:${3 - i}; transform:translateY(${offset}px) scale(${scale}); ${isTop ? '' : 'pointer-events:none;'}">
+      ${renderSwipeCardBody(j, isTop)}
+    </div>`;
+  }).reverse().join('');
+
+  return `
+  <div class="swipe-deck-back">
+    <div class="w-full max-w-md flex items-center justify-between text-white mb-3">
+      <div>
+        <div class="font-headline text-xl font-bold">Swipe through matches</div>
+        <div class="text-xs opacity-80">${remaining} left · ${d.liked.length} saved</div>
+      </div>
+      <button data-action="swipe-exit" class="btn btn-secondary text-xs">Save & exit</button>
+    </div>
+    <div class="swipe-stack">${stackHtml}</div>
+    <div class="flex justify-center gap-6 mt-8">
+      <button data-action="swipe-no" class="w-16 h-16 rounded-full bg-white text-red-500 text-3xl shadow-xl hover:scale-110 transition" title="Dismiss (←)">✗</button>
+      <button data-action="swipe-undo" class="w-14 h-14 rounded-full bg-white/80 text-gray-600 text-xl shadow-lg hover:scale-110 transition ${d.idx === 0 ? 'opacity-40 pointer-events-none' : ''}" title="Undo">↶</button>
+      <button data-action="swipe-yes" class="w-16 h-16 rounded-full bg-white text-green-500 text-3xl shadow-xl hover:scale-110 transition" title="Save (→)">♥</button>
+    </div>
+    <div class="text-xs text-white/70 mt-4">Drag, tap the buttons, or use ← → keys</div>
+  </div>`;
+}
+
+function renderSwipeCardBody(j, isTop) {
+  const co = j.extra?.company || {};
+  const desc = (j.extra?.description || '').slice(0, 400);
+  return `
+    <div class="swipe-stamp like">♥ Like</div>
+    <div class="swipe-stamp nope">✗ Nope</div>
+    <div class="p-6 flex-1 overflow-y-auto">
+      <div class="flex items-start gap-3 mb-3">
+        ${companyLogo(j).replace('w-12 h-12', 'w-14 h-14')}
+        <div class="flex-1 min-w-0">
+          <h3 class="font-headline font-bold text-xl text-gray-900 leading-tight">${j.title}</h3>
+          <div class="text-sm text-gray-600 mt-0.5"><b>${j.company}</b></div>
+        </div>
+        ${j.match ? matchChip(j.match) : ''}
+      </div>
+
+      <div class="flex flex-wrap gap-3 text-sm text-gray-700 mb-4">
+        <span>📍 ${j.location}</span>
+        <span>💰 ${j.salary || '—'}</span>
+      </div>
+
+      ${co.glassdoorRating ? `<div class="mb-3">${renderStarRating(co.glassdoorRating)}</div>` : ''}
+      ${(co.awards || []).length ? `
+        <div class="flex flex-wrap gap-1.5 mb-3">
+          ${co.awards.slice(0,3).map(a=>`<span class="chip chip-amber text-xs">🏆 ${a}</span>`).join('')}
+        </div>` : ''}
+
+      ${desc ? `
+        <div class="text-xs uppercase tracking-wide text-gray-500 font-semibold mt-4 mb-1">About the role</div>
+        <div class="text-sm text-gray-700 whitespace-pre-line leading-relaxed">${desc}${(j.extra?.description||'').length > 400 ? '…' : ''}</div>
+      ` : ''}
+    </div>
+    ${j.url && isTop ? `
+      <div class="p-3 border-t border-gray-100 bg-gray-50">
+        <a href="${j.url}" target="_blank" rel="noopener" class="text-xs text-indigo-600 hover:underline">🔗 View full posting →</a>
+      </div>` : ''}`;
+}
+
+// Called after render() when the swipe deck is active, to attach gesture
+// listeners to the top card. Listeners are replaced on every render
+// (which happens on each swipe), so we don't stack handlers.
+function wireSwipeGestures() {
+  const d = state.swipeDeck;
+  if (!d?.active) return;
+  const topCard = document.querySelector('[data-swipe-card="0"]');
+  if (!topCard) return;
+
+  let startX = 0, startY = 0, dragging = false, pointerId = null;
+  const likeStamp = topCard.querySelector('.swipe-stamp.like');
+  const nopeStamp = topCard.querySelector('.swipe-stamp.nope');
+
+  topCard.addEventListener('pointerdown', (e) => {
+    dragging = true; startX = e.clientX; startY = e.clientY; pointerId = e.pointerId;
+    topCard.setPointerCapture(e.pointerId);
+    topCard.classList.remove('rest'); topCard.classList.add('drag');
+  });
+
+  topCard.addEventListener('pointermove', (e) => {
+    if (!dragging) return;
+    const dx = e.clientX - startX;
+    const dy = e.clientY - startY;
+    const rot = dx / 20; // ~15° at 300px
+    topCard.style.transform = `translate(${dx}px, ${dy}px) rotate(${rot}deg)`;
+    if (likeStamp) likeStamp.style.opacity = Math.max(0, Math.min(1, dx / 120));
+    if (nopeStamp) nopeStamp.style.opacity = Math.max(0, Math.min(1, -dx / 120));
+  });
+
+  const endDrag = (e) => {
+    if (!dragging) return;
+    dragging = false;
+    try { topCard.releasePointerCapture(pointerId); } catch (_) {}
+    topCard.classList.remove('drag'); topCard.classList.add('rest');
+    const dx = e.clientX - startX;
+    if (dx > 120)      commitSwipe('yes');
+    else if (dx < -120) commitSwipe('no');
+    else {
+      // Snap back
+      topCard.style.transform = '';
+      if (likeStamp) likeStamp.style.opacity = '0';
+      if (nopeStamp) nopeStamp.style.opacity = '0';
+    }
+  };
+  topCard.addEventListener('pointerup', endDrag);
+  topCard.addEventListener('pointercancel', endDrag);
+}
+
+// Wrapper so both drag-release and button clicks funnel through the same path
+function commitSwipe(direction) {
+  const d = state.swipeDeck;
+  if (!d?.active) return;
+  const topCard = document.querySelector('[data-swipe-card="0"]');
+  const job = d.jobs[d.idx];
+  if (!job) return;
+
+  // Animate the card off-screen, then advance state and re-render
+  if (topCard) {
+    topCard.classList.add(direction === 'yes' ? 'gone-right' : 'gone-left');
+  }
+  if (direction === 'yes') d.liked.push(job);
+  d.idx += 1;
+  // Let the exit animation breathe for ~200ms before re-rendering the stack
+  setTimeout(() => render(), 200);
+}
+
+async function finalizeSwipeDeck() {
+  const d = state.swipeDeck;
+  if (!d) return;
+  const toSave = d.liked.slice();
+  const total = d.jobs.length;
+  state.swipeDeck = null;
+  if (toSave.length > 0) {
+    await addJobs(toSave);
+    showToast(`Saved ${toSave.length} of ${total} · dismissed ${total - toSave.length}`);
+  } else {
+    render();
+    showToast('Closed — no jobs saved');
+  }
+}
+
+// Keyboard: ← dismiss, → save, Esc exit — only active while the deck is open.
+function onSwipeKeyDown(e) {
+  const d = state.swipeDeck;
+  if (!d?.active) return;
+  if (e.key === 'ArrowRight') { e.preventDefault(); commitSwipe('yes'); }
+  else if (e.key === 'ArrowLeft') { e.preventDefault(); commitSwipe('no'); }
+  else if (e.key === 'Escape') { e.preventDefault(); finalizeSwipeDeck(); }
+}
+if (typeof window !== 'undefined') window.addEventListener('keydown', onSwipeKeyDown);
 
 // Stable signature for deduping a job across searches. Each fresh search
 // generates new random IDs, so we can't use job.id — we fall back to the
@@ -2053,13 +2254,15 @@ async function handleAction(e) {
         const existingSigs = new Set((c.jobs || []).map(jobSignature));
         const newJobs = fresh.filter(j => !existingSigs.has(jobSignature(j)));
         const skipped = fresh.length - newJobs.length;
-        await addJobs(newJobs);
-        if (newJobs.length === 0 && skipped > 0) {
-          showToast(`No new jobs — all ${skipped} were already in your list`);
-        } else if (skipped > 0) {
-          showToast(`Added ${newJobs.length} new · skipped ${skipped} duplicate${skipped>1?'s':''}`);
-        } else if (newJobs.length > 0) {
-          showToast(`Added ${newJobs.length} new job${newJobs.length>1?'s':''}`);
+        if (newJobs.length === 0) {
+          showToast(skipped > 0 ? `No new jobs — all ${skipped} were already in your list` : 'No jobs found');
+        } else {
+          // Open the swipe deck instead of auto-adding. The deck finalizes and
+          // saves only the right-swiped jobs when it closes.
+          openSwipeDeck(newJobs);
+          if (skipped > 0) {
+            showToast(`${newJobs.length} new to review · ${skipped} duplicate${skipped>1?'s':''} skipped`);
+          }
         }
       } catch (e) {
         console.error(e);
@@ -2099,6 +2302,20 @@ async function handleAction(e) {
         console.error(e);
         showToast('Delete failed — ' + (e.message || 'see console'), 'red');
       }
+      break; }
+
+    case 'swipe-yes':  commitSwipe('yes'); break;
+    case 'swipe-no':   commitSwipe('no');  break;
+    case 'swipe-exit': await finalizeSwipeDeck(); break;
+    case 'swipe-undo': {
+      const d = state.swipeDeck;
+      if (!d?.active || d.idx === 0) break;
+      d.idx -= 1;
+      // If the last action was a "yes" (job is in liked[]), pull it back out
+      const prev = d.jobs[d.idx];
+      const likedIdx = d.liked.findIndex(j => j.id === prev.id);
+      if (likedIdx !== -1) d.liked.splice(likedIdx, 1);
+      render();
       break; }
 
     case 'toggle-select-mode': {
