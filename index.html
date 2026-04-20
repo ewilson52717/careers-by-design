@@ -956,7 +956,7 @@ async function voiceEndTake() {
       v.review = resp.review;
     } else {
       v.review = mockInterviewReview(drill, v.transcript, elapsed);
-      if (!resp.configured) showToast('Using sample review — set ANTHROPIC_API_KEY for real Claude feedback', 'red');
+      if (!resp.configured) showToast('Using sample review — analysis service not configured', 'red');
     }
   } catch (e) {
     console.error(e);
@@ -1034,8 +1034,8 @@ function buildPage() {
   switch (state.page) {
     case 'login':    return renderLogin();
     case 'register': return renderRegister();
-    case 'client':   return renderHeader() + `<main class="max-w-6xl mx-auto px-4 py-8">${renderClientTabs()}</main>` + renderFooter() + renderSwipeDeck();
-    case 'coach':    return renderHeader() + `<main class="max-w-7xl mx-auto px-4 py-8">${renderCoach()}</main>` + renderFooter() + renderSwipeDeck();
+    case 'client':   return renderHeader() + `<main class="max-w-6xl mx-auto px-4 py-8">${renderClientTabs()}</main>` + renderFooter() + renderSwipeDeck() + renderJobDetailsModal();
+    case 'coach':    return renderHeader() + `<main class="max-w-7xl mx-auto px-4 py-8">${renderCoach()}</main>` + renderFooter() + renderSwipeDeck() + renderJobDetailsModal();
     case 'loading':  return renderLoadingScreen(state.loadingMsg);
     case 'error':    return `<div class="min-h-screen flex items-center justify-center p-8"><div class="card p-8 max-w-md text-center"><div class="text-4xl mb-3">⚠️</div><h2 class="font-bold text-gray-900">Something went wrong</h2><p class="text-sm text-gray-600 mt-2">${state.errorMsg || 'Unknown error'}</p><button onclick="location.reload()" class="btn btn-primary mt-4">Reload</button></div></div>`;
     default: return renderLogin();
@@ -1691,25 +1691,22 @@ function renderSwipeCardBody(j, isTop) {
       </div>` : ''}`;
 }
 
-// Community insights (Reddit → Claude synthesis) rendered inside job details.
-// Shows a summary, green/red flags, themed takeaways with clickable source
-// threads, and confidence indicator. When citations reference a thread,
-// the theme pills link out to the actual Reddit post.
+// Community insights block — source-agnostic rendering. Citations show a
+// neutral domain label (not source-branded copy) so the UI doesn't reveal
+// where any specific claim came from unless the user clicks through.
 function renderCommunityInsightsBlock(insights, job) {
   if (!insights) return '';
-  const confDot = { high: '#10b981', medium: '#f59e0b', low: '#9ca3af' }[insights.confidence] || '#9ca3af';
+  const confDot   = { high: '#10b981', medium: '#f59e0b', low: '#9ca3af' }[insights.confidence] || '#9ca3af';
   const confLabel = { high: 'strong signal', medium: 'mixed signal', low: 'thin signal' }[insights.confidence] || '';
   const cites = insights.citations || [];
-  const fetchedAgo = insights.fetchedAt ? ` · pulled ${new Date(insights.fetchedAt).toLocaleDateString()}` : '';
+  const fetchedAgo = insights.fetchedAt ? ` · updated ${new Date(insights.fetchedAt).toLocaleDateString()}` : '';
+  const shortDomain = (d) => (d || '').replace(/^www\./, '').replace(/\.(com|org|io|co|app|ai)$/, '');
 
   return `
-  <div class="mt-5">
+  <div>
     <div class="flex items-center justify-between mb-2 flex-wrap gap-2">
-      <div class="flex items-center gap-2">
-        <span class="text-xs font-semibold uppercase tracking-wide text-gray-500">🗣 Community insights</span>
-        <span class="inline-flex items-center gap-1 text-[10px] text-gray-500 uppercase tracking-wider">
-          <span class="w-1.5 h-1.5 rounded-full" style="background:${confDot}"></span>${confLabel}${fetchedAgo}
-        </span>
+      <div class="inline-flex items-center gap-2 text-[10px] text-gray-500 uppercase tracking-wider">
+        <span class="w-1.5 h-1.5 rounded-full" style="background:${confDot}"></span>${confLabel}${fetchedAgo}
       </div>
       <button data-action="refresh-culture-intel" data-job="${job.id}" class="btn btn-ghost text-xs">🔄 Refresh</button>
     </div>
@@ -1746,20 +1743,22 @@ function renderCommunityInsightsBlock(insights, job) {
               <div class="text-xs text-gray-600 mt-0.5">${t.insight}</div>
               ${sources.length ? `
                 <div class="mt-2 flex flex-wrap gap-1.5">
-                  ${sources.map(s => `<a href="${s.url}" target="_blank" rel="noopener" class="chip chip-gray text-[10px] hover:underline" title="${s.title.replace(/"/g,'&quot;')}">r/${s.subreddit} · ${s.score}↑</a>`).join('')}
+                  ${sources.map(s => `<a href="${s.url}" target="_blank" rel="noopener" class="chip chip-gray text-[10px] hover:underline" title="${(s.title||'').replace(/"/g,'&quot;')}">${shortDomain(s.domain)}${s.age ? ' · ' + s.age : ''}</a>`).join('')}
                 </div>` : ''}
             </div>`;
           }).join('')}
         </div>` : ''}
 
-      ${!insights.themes?.length && cites.length ? `
-        <div class="mt-4 space-y-1">
-          <div class="text-[10px] uppercase tracking-wider text-gray-500 font-semibold mb-1">Raw threads</div>
-          ${cites.slice(0, 8).map(c => `
-            <a href="${c.url}" target="_blank" rel="noopener" class="block text-xs text-gray-700 hover:text-indigo-700 hover:underline">
-              r/${c.subreddit} · ${c.score}↑ · ${c.title}
-            </a>`).join('')}
-        </div>` : ''}
+      ${cites.length ? `
+        <details class="mt-4">
+          <summary class="text-[10px] uppercase tracking-wider text-gray-500 font-semibold cursor-pointer hover:text-gray-700">All sources (${cites.length})</summary>
+          <div class="mt-2 space-y-1">
+            ${cites.slice(0, 20).map(c => `
+              <a href="${c.url}" target="_blank" rel="noopener" class="block text-xs text-gray-700 hover:text-indigo-700 hover:underline">
+                <span class="text-gray-400">${shortDomain(c.domain)}${c.age ? ' · ' + c.age : ''}</span> — ${c.title}
+              </a>`).join('')}
+          </div>
+        </details>` : ''}
     </div>
   </div>`;
 }
@@ -1880,6 +1879,25 @@ function onSwipeKeyDown(e) {
   else if (e.key === 'Escape') { e.preventDefault(); finalizeSwipeDeck(); }
 }
 if (typeof window !== 'undefined') window.addEventListener('keydown', onSwipeKeyDown);
+
+// Opens the scrollable job-details modal. `scrollTo` targets a section
+// anchor inside the modal body (insights | apply | description). The modal
+// lives outside the job card so scroll-in-card is independent.
+function openJobDetails(jobId, scrollTo) {
+  state.jobDetailsModal = { jobId, scrollTo: scrollTo || null };
+  render();
+  if (scrollTo) {
+    setTimeout(() => {
+      const target = document.getElementById('jd-section-' + scrollTo);
+      if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 40);
+  }
+}
+
+function closeJobDetails() {
+  state.jobDetailsModal = null;
+  render();
+}
 
 // Stable signature for deduping a job across searches. Each fresh search
 // generates new random IDs, so we can't use job.id — we fall back to the
@@ -2004,12 +2022,11 @@ function renderJobCard(j, c) {
 
         <div class="flex flex-wrap items-center gap-2 mt-4">
           ${j.url ? `<a href="${j.url}" target="_blank" rel="noopener" class="btn btn-secondary text-xs inline-flex items-center gap-1">🔗 View posting</a>` : ''}
-          <button data-action="toggle-job-details" data-job="${j.id}" class="btn btn-secondary text-xs">
-            ${ui.details ? '▲ Hide details' : '▼ Details'}
-          </button>
-          <button data-action="toggle-job-apply" data-job="${j.id}" class="btn btn-primary text-xs">
+          <button data-action="open-details" data-job="${j.id}" class="btn btn-secondary text-xs">📋 Details</button>
+          <button data-action="open-details" data-job="${j.id}" data-scroll="apply" class="btn btn-primary text-xs">
             ${submitted ? '✓ Submitted' : generated ? '📝 Review application' : '✨ Start application'}
           </button>
+          <button data-action="open-details" data-job="${j.id}" data-scroll="insights" class="btn btn-secondary text-xs">🗣 Insights</button>
           <select data-action="job-status" data-job="${j.id}" class="text-xs border border-gray-300 rounded-lg px-2 py-1.5 ml-auto">
             ${['new','interested','applied','interviewing','offer','rejected'].map(s=>`<option value="${s}" ${j.status===s?'selected':''}>${s}</option>`).join('')}
           </select>
@@ -2028,19 +2045,83 @@ function renderJobCard(j, c) {
           </div>` : ''}
 
         ${j.notes ? `<div class="mt-3 text-sm bg-[#eef2ff] rounded-lg p-2.5 border border-[#e5e7eb]">📝 ${j.notes}</div>` : ''}
-
-        ${ui.details ? renderJobDetailsPanel(j) : ''}
-        ${ui.apply   ? renderJobApplyPanel(j, c) : ''}
       </div>
     </div>
   </div>`;
 }
 
+// Renders the full-screen-ish scrollable modal containing all the deep job
+// context — description, company/culture, application materials, insights.
+// Anchored to state.jobDetailsModal.jobId; returns '' when closed.
+function renderJobDetailsModal() {
+  const m = state.jobDetailsModal;
+  if (!m?.jobId) return '';
+  const c = state.client || {};
+  const j = (c.jobs || []).find(x => x.id === m.jobId);
+  if (!j) return '';
+  const submitted = j.extra?.submission?.submitted;
+  const generated = j.extra?.application?.generated;
+  return `
+  <div class="modal-back" data-action="close-details">
+    <div class="bg-white rounded-2xl w-full max-w-3xl max-h-[88vh] flex flex-col shadow-2xl" onclick="event.stopPropagation()">
+      <!-- Sticky header -->
+      <div class="p-5 border-b border-gray-200 flex items-start gap-4">
+        ${companyLogo(j)}
+        <div class="flex-1 min-w-0">
+          <h2 class="font-headline font-bold text-lg leading-tight">${j.title}</h2>
+          <div class="text-sm text-gray-600 mt-0.5"><b>${j.company}</b> · ${j.location} · ${j.salary || ''}</div>
+          <div class="flex items-center gap-2 mt-2">
+            ${matchChip(j.match)}${statusChip(j.status)}
+            ${j.url ? `<a href="${j.url}" target="_blank" rel="noopener" class="text-xs text-indigo-600 hover:underline">🔗 View posting</a>` : ''}
+          </div>
+        </div>
+        <button data-action="close-details" class="text-gray-400 hover:text-gray-700 text-2xl leading-none shrink-0" title="Close">×</button>
+      </div>
+
+      <!-- Scrollable body with section anchors -->
+      <div class="flex-1 overflow-y-auto p-6 space-y-6">
+        ${j.extra?.fitSummary ? `
+          <div class="rounded-lg p-3 bg-[#eef2ff] border border-[#c7d2fe]">
+            <div class="text-[10px] uppercase tracking-wider text-indigo-700 font-semibold mb-0.5">✨ Why it fits</div>
+            <div class="text-sm text-[#1e1b4b] leading-snug">${j.extra.fitSummary}</div>
+          </div>` : ''}
+
+        <section id="jd-section-description">
+          ${renderJobDetailsPanel(j)}
+        </section>
+
+        <section id="jd-section-apply">
+          <div class="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">
+            ${submitted ? 'Submission' : generated ? 'Application draft' : 'Start application'}
+          </div>
+          ${renderJobApplyPanel(j, c)}
+        </section>
+
+        <section id="jd-section-insights">
+          <div class="flex items-center justify-between mb-2">
+            <div class="text-xs font-semibold uppercase tracking-wide text-gray-500">🗣 Insights</div>
+          </div>
+          ${j.extra?.communityInsights
+            ? renderCommunityInsightsBlock(j.extra.communityInsights, j)
+            : `<div class="card p-5 text-center">
+                 <div class="text-3xl mb-2">🗣</div>
+                 <p class="text-sm text-gray-600 mb-4">Pull a fresh read on <b>${j.company}</b> from public discussions, news, and community chatter.</p>
+                 <button data-action="fetch-culture-intel" data-job="${j.id}" class="btn btn-primary text-sm">Load insights</button>
+               </div>`}
+        </section>
+      </div>
+    </div>
+  </div>`;
+}
+
+// Renders the "description + company + outreach" body used inside the
+// scrollable modal. Insights now live in their own modal section, so this
+// function no longer renders them here.
 function renderJobDetailsPanel(j) {
   const co = j.extra?.company || {};
   const desc = j.extra?.description || '';
   return `
-  <div class="mt-5 border-t border-[#e5e7eb] pt-4 space-y-4">
+  <div class="space-y-5">
     <div>
       <div class="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">Job description</div>
       ${desc
@@ -2053,7 +2134,7 @@ function renderJobDetailsPanel(j) {
       <div class="grid sm:grid-cols-2 gap-3 text-sm">
         ${co.industry ? `<div><span class="text-gray-500">Industry:</span> ${co.industry}</div>` : ''}
         ${co.size ? `<div><span class="text-gray-500">Size:</span> ${co.size}</div>` : ''}
-        ${co.glassdoorRating ? `<div><span class="text-gray-500">Glassdoor:</span> ${renderStarRating(co.glassdoorRating)}</div>` : ''}
+        ${co.glassdoorRating ? `<div><span class="text-gray-500">Rating:</span> ${renderStarRating(co.glassdoorRating)}</div>` : ''}
         ${j.extra?.website ? `<div><span class="text-gray-500">Website:</span> <a href="https://${j.extra.website}" target="_blank" rel="noopener" class="underline">${j.extra.website}</a></div>` : ''}
       </div>
       ${(co.awards||[]).length ? `
@@ -2073,17 +2154,8 @@ function renderJobDetailsPanel(j) {
         <div class="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">Outreach strategy</div>
         ${renderOutreachBlock(j.extra.outreachStrategy, j)}
         ${j.extra.outreachStrategy.linkedInSearch ? `
-          <a href="https://www.linkedin.com/search/results/people/?keywords=${encodeURIComponent(j.extra.outreachStrategy.linkedInSearch)}" target="_blank" rel="noopener" class="btn btn-secondary text-xs inline-flex items-center gap-2">🔎 Open this search on LinkedIn</a>` : ''}
+          <a href="https://www.linkedin.com/search/results/people/?keywords=${encodeURIComponent(j.extra.outreachStrategy.linkedInSearch)}" target="_blank" rel="noopener" class="btn btn-secondary text-xs inline-flex items-center gap-2 mt-2">🔎 Open this search on LinkedIn</a>` : ''}
       </div>` : ''}
-
-    ${j.extra?.communityInsights
-      ? renderCommunityInsightsBlock(j.extra.communityInsights, j)
-      : `<div class="mt-5">
-           <button data-action="fetch-culture-intel" data-job="${j.id}" class="btn btn-secondary text-sm inline-flex items-center gap-2">
-             🗣 Pull community insights
-           </button>
-           <span class="text-xs text-gray-500 ml-2">What people on Reddit say about working at ${j.company}</span>
-         </div>`}
   </div>`;
 }
 
@@ -2232,7 +2304,7 @@ function renderVoiceDrillPicker() {
     <div class="flex items-end justify-between flex-wrap gap-3 mb-6">
       <div>
         <h2 class="text-2xl font-bold font-headline">🎙️ Voice Coach</h2>
-        <p class="text-sm text-gray-500">Pick a drill. Speak your answer aloud. Get instant Claude-powered feedback.</p>
+        <p class="text-sm text-gray-500">Pick a drill. Speak your answer aloud. Get instant, honest feedback.</p>
       </div>
       <div class="text-xs text-gray-500">
         ${DRILLS.length} drills · Behavioral · Case · Executive presence · Negotiation
@@ -2368,7 +2440,7 @@ function renderVoiceAnalyzing() {
   <div class="max-w-2xl mx-auto text-center py-16">
     <div class="text-4xl mb-4">✨</div>
     <h2 class="font-headline text-3xl font-bold mb-2">Listening back…</h2>
-    <p class="text-gray-500 mb-6">Claude is reviewing your take on <b>"${drill?.title || 'this drill'}"</b>. Usually takes 5-10 seconds.</p>
+    <p class="text-gray-500 mb-6">Reviewing your take on <b>"${drill?.title || 'this drill'}"</b>. Usually takes 5–10 seconds.</p>
     <div class="loading-dots"><span></span><span></span><span></span></div>
   </div>`;
 }
@@ -2769,7 +2841,7 @@ async function handleAction(e) {
         const resp = await scriptCall({ action: 'analyze_profile', email: viewedEmail(), questionnaire: q });
         profile = resp.configured && resp.profile ? resp.profile : mockAnalyzeProfile(q);
         if (!resp.configured) {
-          showToast('Using sample analysis — set ANTHROPIC_API_KEY for real output', 'red');
+          showToast('Using sample analysis — analysis service not configured', 'red');
         }
       } catch (e) {
         console.error(e);
@@ -2794,7 +2866,7 @@ async function handleAction(e) {
           fresh = resp.jobs.map(j => ({ ...j, clientEmail: viewedEmail() }));
         } else {
           fresh = mockJobSearch(c.questionnaire || {});
-          showToast('Using sample jobs — set RAPIDAPI_KEY for live results', 'red');
+          showToast('Using sample jobs — live search not configured', 'red');
         }
         // Dedup against existing
         const existingSigs = new Set((c.jobs || []).map(jobSignature));
@@ -2806,8 +2878,8 @@ async function handleAction(e) {
           // Keyword-baseline match score so the cards never say "0%"
           newJobs.forEach(j => { j.match = j.match || keywordMatchScore(j, c.questionnaire || {}); });
 
-          // Batch-enrich via Claude: per-job fit summary, culture, outreach
-          setStatus('Claude is analyzing fit, culture, and outreach strategy…');
+          // Batch-enrich: per-job fit summary, culture, outreach
+          setStatus('Analyzing fit, culture, and outreach angles…');
           try {
             const enr = await scriptCall({
               action: 'enrich_jobs',
@@ -2855,8 +2927,14 @@ async function handleAction(e) {
       render();
       await saveJob(job); break; }
 
-    case 'toggle-job-details': toggleJobUI(el.dataset.job, 'details'); break;
-    case 'toggle-job-apply':   toggleJobUI(el.dataset.job, 'apply');   break;
+    case 'open-details': {
+      openJobDetails(el.dataset.job, el.dataset.scroll || null);
+      break; }
+    case 'close-details': closeJobDetails(); break;
+
+    // Legacy no-ops (kept for any stale buttons cached in closed tabs)
+    case 'toggle-job-details': openJobDetails(el.dataset.job); break;
+    case 'toggle-job-apply':   openJobDetails(el.dataset.job, 'apply'); break;
 
     case 'delete-job': {
       const jid = el.dataset.job;
@@ -2936,7 +3014,7 @@ async function handleAction(e) {
       const jid = el.dataset.job;
       const job = c.jobs.find(j => j.id === jid);
       if (!job) break;
-      el.disabled = true; el.innerHTML = '<span class="spinner"></span> Drafting with Claude…';
+      el.disabled = true; el.innerHTML = '<span class="spinner"></span> Drafting…';
       try {
         const resp = await scriptCall({ action: 'generate_materials', email: viewedEmail(), job });
         if (resp.configured && resp.materials) {
@@ -2946,7 +3024,7 @@ async function handleAction(e) {
           // API key not set yet — use the stub so the UX still works
           job.extra = job.extra || {};
           job.extra.application = mockApplicationMaterials(job, c);
-          showToast('Using draft stub — set ANTHROPIC_API_KEY in Script Properties for real output', 'red');
+          showToast('Using draft stub — analysis service not configured', 'red');
         }
       } catch (e) {
         console.error(e);
@@ -3041,7 +3119,7 @@ async function handleAction(e) {
       if (!company) { showToast('No company on file for this job', 'red'); break; }
       const refresh = el.dataset.action === 'refresh-culture-intel';
       const origLabel = el.innerHTML;
-      el.disabled = true; el.innerHTML = '<span class="spinner"></span> Scanning Reddit…';
+      el.disabled = true; el.innerHTML = '<span class="spinner"></span> Loading insights…';
       try {
         const resp = await scriptCall({
           action: 'fetch_company_culture',
