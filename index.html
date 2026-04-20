@@ -924,9 +924,8 @@ function renderClientTabs() {
   const tab = state.tab || 'intake';
   const c = state.client;
   const tabs = [
-    ['intake','Intake'],
+    ['intake','✨ Get Started'],
     ['profile','My Profile'],
-    ['assessment','Assessment'],
     ['jobs','Job Search'],
     ['prep','Interview Prep'],
     ['voice','🎙️ Voice Coach'],
@@ -939,7 +938,6 @@ function renderClientTabs() {
     <div class="slide-in">
       ${tab==='intake'?renderIntake(c)
         :tab==='profile'?renderProfile(c)
-        :tab==='assessment'?renderAssessment(c)
         :tab==='jobs'?renderJobs(c)
         :tab==='prep'?renderPrep(c)
         :tab==='voice'?renderVoice()
@@ -947,89 +945,192 @@ function renderClientTabs() {
     </div>`;
 }
 
-// ── INTAKE  ────────────────────────────────────────────────────────────
+// ── GET STARTED (assessment + intake merged)  ─────────────────────────
+// Two-phase progressive flow:
+//   1. Big Five assessment (or skip straight to Phase 2 if already done)
+//   2. Practical profile form, pre-filled with inferences from the assessment
+// Once saved, the combined analysis runs and the user lands on My Profile.
 function renderIntake(c) {
   const q = c.questionnaire || {};
-  return `
-  <div class="grid md:grid-cols-3 gap-6">
-    <div class="md:col-span-2 space-y-6">
-      <div class="card p-6">
-        <div class="flex items-center justify-between mb-4">
-          <div><h2 class="text-xl font-bold font-headline">1. Resume</h2><p class="text-sm text-gray-500">Upload or paste a summary of your latest resume.</p></div>
-          ${c.resume?.uploaded ? `<span class="chip chip-green">Uploaded</span>` : `<span class="chip chip-gray">Pending</span>`}
+  const asmt = bigFiveState();
+  const quizActive = asmt._started || Object.keys(asmt.answers).length > 0;
+  const hasScores = !!q.bigFive;
+
+  // Phase 1: take the assessment (either first-time or a retake)
+  if (!hasScores || quizActive) return renderIntakePhaseAssessment(c);
+  // Phase 2: pre-filled practical fields
+  return renderIntakePhaseProfile(c);
+}
+
+function renderIntakePhaseAssessment(c) {
+  const asmt = bigFiveState();
+  const answered = Object.keys(asmt.answers).length;
+  const hasStarted = asmt._started || answered > 0;
+  const isRetake = !!c.questionnaire?.bigFive;
+
+  // Intro screen
+  if (!hasStarted) {
+    return `
+    <div class="max-w-2xl mx-auto">
+      <div class="card p-8 text-center">
+        <div class="text-4xl mb-3">🧭</div>
+        <h2 class="font-headline text-3xl font-bold mb-2">${isRetake ? 'Retake the' : 'Welcome! Let\'s start with your'} work-style assessment</h2>
+        <p class="text-gray-600 mb-6 max-w-md mx-auto">25 quick questions across five dimensions. We'll use your answers to pre-fill your profile and recommend roles that fit how you actually work. Takes about 4 minutes. ⏱</p>
+        <div class="flex flex-wrap gap-2 justify-center mb-6 text-xs">
+          ${Object.entries(TRAIT_META).map(([k,m]) => `
+            <div class="px-3 py-2 rounded-lg bg-white border border-gray-200 whitespace-nowrap">
+              <div class="font-headline font-bold text-indigo-700">${m.name}</div>
+            </div>`).join('')}
         </div>
-        ${c.resume?.uploaded ? `
-          <div class="flex items-center gap-3 bg-[#eef2ff] rounded-xl p-3">
-            <div class="w-10 h-10 bg-[#c7d2fe] rounded-lg flex items-center justify-center text-[#3730a3] font-bold text-sm">📄</div>
-            <div class="flex-1 min-w-0">
-              <div class="font-medium text-gray-900 text-sm">${c.resume.fileName || 'Resume on file'}</div>
-              <div class="text-xs text-gray-500 truncate">${(c.resume.summary||'').slice(0,120)}${(c.resume.summary||'').length>120?'…':''}</div>
-            </div>
-            <button data-action="clear-resume" class="btn btn-ghost text-xs">Replace</button>
-          </div>` : `
-          <div>
-            <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 p-4 border border-dashed border-[#e5e7eb] rounded-xl bg-[#ffffff]">
-              <label for="resume-file-input" class="btn btn-secondary text-sm inline-flex items-center justify-center gap-2 cursor-pointer whitespace-nowrap">
-                📎 Upload file
-              </label>
-              <input id="resume-file-input" type="file" accept=".pdf,.doc,.docx,.txt,.md,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain,text/markdown" class="hidden" onchange="handleResumeFilePick(event)" />
-              <div class="flex-1 min-w-0">
-                <div class="text-sm text-gray-700"><b>Upload your resume</b> — PDF, DOCX, or plain text</div>
-                <div class="text-xs text-gray-500">We'll extract the text automatically. You can also just paste a summary below.</div>
-              </div>
-            </div>
-            <div class="mt-4">
-              <label class="block text-sm font-medium text-gray-700 mb-1">Paste resume summary</label>
-              <textarea id="resume-summary" rows="4" class="w-full border border-gray-300 rounded-xl p-3 text-sm" placeholder="Paste a short summary of your work history, skills, and key achievements…">${q.resumeSummary||''}</textarea>
-              <input id="resume-filename" class="mt-2 w-full border border-gray-300 rounded-xl p-2 text-sm" placeholder="File name (optional, e.g. Jane_Smith_Resume.pdf)" value="${q.resumeFile||''}" />
-              <button data-action="save-resume" class="btn btn-primary mt-3 text-sm">Save resume</button>
-            </div>
-          </div>`}
+        <button data-action="start-assessment" class="btn btn-primary">${isRetake ? 'Start over →' : 'Begin →'}</button>
+        <p class="text-xs text-gray-400 mt-4">Based on the Big Five (IPIP) framework — scientifically validated across decades of research.</p>
+      </div>
+    </div>`;
+  }
+
+  // Quiz in progress — one question at a time
+  const total = BIG_FIVE_QUESTIONS.length;
+  const idx = Math.min(asmt.idx, total - 1);
+  const q = BIG_FIVE_QUESTIONS[idx];
+  const pickedVal = asmt.answers[q.id];
+  const pct = Math.round(((idx) / total) * 100);
+  const allAnswered = answered === total;
+
+  return `
+  <div class="max-w-2xl mx-auto">
+    <div class="card p-6">
+      <div class="flex items-center justify-between text-xs text-gray-500 mb-2">
+        <span>Question ${idx + 1} of ${total}</span>
+        <span>${answered} answered</span>
+      </div>
+      <div class="progress-bar mb-6"><div class="progress-fill" style="width:${pct}%"></div></div>
+
+      <div class="text-xs uppercase tracking-wide font-semibold text-[#4f46e5] mb-2">${TRAIT_META[q.trait].name}</div>
+      <h2 class="font-headline text-2xl leading-snug mb-6">${q.text}</h2>
+
+      <div class="space-y-2">
+        ${LIKERT_OPTIONS.map(opt => `
+          <button data-action="answer-question" data-question="${q.id}" data-value="${opt.v}"
+            class="w-full text-left px-4 py-3 rounded-xl border transition ${pickedVal === opt.v ? 'bg-[#eef2ff] border-[#4f46e5] text-[#3730a3] font-semibold' : 'bg-white border-gray-200 hover:border-[#4f46e5]'}">
+            ${opt.label}
+          </button>`).join('')}
       </div>
 
-      <div class="card p-6">
-        <h2 class="text-xl font-bold font-headline mb-1">2. About you</h2>
-        <p class="text-sm text-gray-500 mb-5">Help us understand how you work and what you want next.</p>
-        <div class="grid md:grid-cols-2 gap-4">
-          <div><label class="text-sm font-medium text-gray-700">Work style</label>
-            <select id="q-workStyle" class="mt-1 w-full border border-gray-300 rounded-xl p-2 text-sm">
-              ${['collaborative','deep-focus','hybrid','fast-paced','structured'].map(v=>`<option ${q.workStyle===v?'selected':''}>${v}</option>`).join('')}
-            </select></div>
-          <div><label class="text-sm font-medium text-gray-700">Target role</label>
-            <input id="q-roleTarget" value="${q.roleTarget||''}" class="mt-1 w-full border border-gray-300 rounded-xl p-2 text-sm" placeholder="e.g. Senior Product Manager" /></div>
-          <div><label class="text-sm font-medium text-gray-700">Location preference</label>
-            <input id="q-locationPref" value="${q.locationPref||''}" class="mt-1 w-full border border-gray-300 rounded-xl p-2 text-sm" placeholder="Remote, NYC, Hybrid…" /></div>
-          <div><label class="text-sm font-medium text-gray-700">Salary floor (USD)</label>
-            <input id="q-salaryFloor" type="text" inputmode="numeric" value="${q.salaryFloor ? formatCurrency(q.salaryFloor) : ''}" class="mt-1 w-full border border-gray-300 rounded-xl p-2 text-sm" placeholder="$120,000" /></div>
-          <div class="md:col-span-2"><label class="text-sm font-medium text-gray-700">Top strengths (comma-separated)</label>
-            <input id="q-strengths" value="${(q.strengths||[]).join(', ')}" class="mt-1 w-full border border-gray-300 rounded-xl p-2 text-sm" placeholder="storytelling, analytics, leadership" /></div>
-          <div class="md:col-span-2"><label class="text-sm font-medium text-gray-700">Industries of interest</label>
-            <input id="q-industries" value="${(q.industries||[]).join(', ')}" class="mt-1 w-full border border-gray-300 rounded-xl p-2 text-sm" placeholder="SaaS, FinTech, Healthcare" /></div>
-          <div><label class="text-sm font-medium text-gray-700">What energizes you?</label>
-            <textarea id="q-energizers" rows="2" class="mt-1 w-full border border-gray-300 rounded-xl p-2 text-sm">${q.energizers||''}</textarea></div>
-          <div><label class="text-sm font-medium text-gray-700">What drains you?</label>
-            <textarea id="q-drainers" rows="2" class="mt-1 w-full border border-gray-300 rounded-xl p-2 text-sm">${q.drainers||''}</textarea></div>
+      <div class="flex items-center justify-between mt-6">
+        <button data-action="prev-question" class="btn btn-secondary ${idx === 0 ? 'opacity-40 pointer-events-none' : ''}">← Back</button>
+        ${idx < total - 1
+          ? `<button data-action="next-question" class="btn btn-primary ${pickedVal ? '' : 'opacity-40 pointer-events-none'}">Next →</button>`
+          : `<button data-action="submit-assessment" class="btn btn-primary ${allAnswered ? '' : 'opacity-40 pointer-events-none'}">Continue to profile →</button>`
+        }
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderIntakePhaseProfile(c) {
+  const q = c.questionnaire || {};
+  const scores = q.bigFive;
+  const inferred = inferFromBigFive(scores);
+  const workStyle  = q.workStyle  || inferred.workStyle;
+  const strengths  = (q.strengths && q.strengths.length) ? q.strengths : inferred.strengths;
+  const energizers = q.energizers || inferred.energizers;
+  const drainers   = q.drainers   || inferred.drainers;
+  const analyzed   = !!c.profile?.analyzed;
+
+  return `
+  <div class="max-w-4xl mx-auto space-y-6">
+    ${analyzed ? `
+      <div class="card p-5 bg-green-50 border-green-200 flex items-center gap-3">
+        <div class="text-2xl">✅</div>
+        <div class="flex-1">
+          <div class="font-bold text-green-900">Your profile is set up.</div>
+          <div class="text-sm text-green-800">You can edit anything below and re-run analysis, or jump to <button data-action="set-tab" data-tab="profile" class="underline text-indigo-600 font-medium">My Profile</button> to see your results.</div>
         </div>
-        <button data-action="save-questionnaire" class="btn btn-primary mt-5">Save & analyze profile →</button>
+      </div>` : ''}
+
+    <!-- Phase 1 recap: assessment results -->
+    <div class="card p-6">
+      <div class="flex items-start justify-between mb-4 gap-3">
+        <div>
+          <h2 class="text-xl font-bold font-headline">🧭 Your work-style results</h2>
+          <p class="text-sm text-gray-500">Based on your assessment. We used these to pre-fill the form below — edit anything that doesn't feel right.</p>
+        </div>
+        <button data-action="retake-assessment" class="btn btn-ghost text-xs shrink-0">🔄 Retake</button>
+      </div>
+      <div class="grid grid-cols-2 sm:grid-cols-5 gap-3 text-xs">
+        ${['O','C','E','A','N'].map(k => {
+          const s = scores[k] ?? 0;
+          const m = TRAIT_META[k];
+          return `
+          <div class="p-3 rounded-lg bg-[#eef2ff] border border-[#c7d2fe]">
+            <div class="font-semibold text-indigo-900 mb-1">${m.name}</div>
+            <div class="font-headline text-xl font-bold text-indigo-700">${s}<span class="text-xs text-gray-500">/100</span></div>
+            <div class="progress-bar mt-1"><div class="progress-fill" style="width:${s}%"></div></div>
+          </div>`;
+        }).join('')}
       </div>
     </div>
 
-    <div class="space-y-5">
-      <div class="card p-6">
-        <h3 class="font-bold">Your progress</h3>
-        <ul class="mt-3 space-y-2 text-sm">
-          ${[['Resume',c.resume?.uploaded],['Questionnaire',!!q.roleTarget],['Profile analyzed',!!c.profile?.analyzed]].map(([l,done])=>`<li class="flex items-center gap-2"><span class="${done?'text-green-600':'text-gray-400'}">${done?'✓':'○'}</span><span class="${done?'text-gray-900':'text-gray-400'}">${l}</span></li>`).join('')}
-        </ul>
+    <!-- Resume -->
+    <div class="card p-6">
+      <div class="flex items-center justify-between mb-4">
+        <div><h2 class="text-xl font-bold font-headline">📄 Resume</h2><p class="text-sm text-gray-500">Upload or paste a summary so we can tailor your materials.</p></div>
+        ${c.resume?.uploaded ? `<span class="chip chip-green">Uploaded</span>` : `<span class="chip chip-gray">Pending</span>`}
       </div>
-      <div class="card p-6 brand-grad text-white">
-        <h3 class="font-bold">What happens next?</h3>
-        <ol class="text-sm mt-2 space-y-1 opacity-90 list-decimal list-inside">
-          <li>Your coach reviews your intake</li>
-          <li>AI surfaces matching job opportunities</li>
-          <li>You practice with the voice coach</li>
-          <li>Track applications on your dashboard</li>
-        </ol>
+      ${c.resume?.uploaded ? `
+        <div class="flex items-center gap-3 bg-[#eef2ff] rounded-xl p-3">
+          <div class="w-10 h-10 bg-[#c7d2fe] rounded-lg flex items-center justify-center text-[#3730a3] font-bold text-sm">📄</div>
+          <div class="flex-1 min-w-0">
+            <div class="font-medium text-gray-900 text-sm">${c.resume.fileName || 'Resume on file'}</div>
+            <div class="text-xs text-gray-500 truncate">${(c.resume.summary||'').slice(0,120)}${(c.resume.summary||'').length>120?'…':''}</div>
+          </div>
+          <button data-action="clear-resume" class="btn btn-ghost text-xs">Replace</button>
+        </div>` : `
+        <div>
+          <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 p-4 border border-dashed border-gray-300 rounded-xl bg-white">
+            <label for="resume-file-input" class="btn btn-secondary text-sm inline-flex items-center justify-center gap-2 cursor-pointer whitespace-nowrap">
+              📎 Upload file
+            </label>
+            <input id="resume-file-input" type="file" accept=".pdf,.doc,.docx,.txt,.md,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain,text/markdown" class="hidden" onchange="handleResumeFilePick(event)" />
+            <div class="flex-1 min-w-0">
+              <div class="text-sm text-gray-700"><b>Upload your resume</b> — PDF, DOCX, or plain text</div>
+              <div class="text-xs text-gray-500">We'll extract the text automatically. You can also just paste a summary below.</div>
+            </div>
+          </div>
+          <div class="mt-4">
+            <label class="block text-sm font-medium text-gray-700 mb-1">Paste resume summary</label>
+            <textarea id="resume-summary" rows="4" class="w-full border border-gray-300 rounded-xl p-3 text-sm" placeholder="Paste a short summary of your work history, skills, and key achievements…">${q.resumeSummary||''}</textarea>
+            <input id="resume-filename" class="mt-2 w-full border border-gray-300 rounded-xl p-2 text-sm" placeholder="File name (optional, e.g. Jane_Smith_Resume.pdf)" value="${q.resumeFile||''}" />
+            <button data-action="save-resume" class="btn btn-primary mt-3 text-sm">Save resume</button>
+          </div>
+        </div>`}
+    </div>
+
+    <!-- Practical fields, pre-filled -->
+    <div class="card p-6">
+      <h2 class="text-xl font-bold font-headline mb-1">✨ A few more details</h2>
+      <p class="text-sm text-gray-500 mb-5">We've filled in what we could from your assessment. Confirm or edit these, then add the things we can't guess (target role, location, salary).</p>
+      <div class="grid md:grid-cols-2 gap-4">
+        <div><label class="text-sm font-medium text-gray-700">Work style <span class="text-xs text-indigo-600 font-normal">· suggested from assessment</span></label>
+          <select id="q-workStyle" class="mt-1 w-full border border-gray-300 rounded-xl p-2 text-sm">
+            ${['collaborative','deep-focus','hybrid','fast-paced','structured'].map(v=>`<option ${workStyle===v?'selected':''}>${v}</option>`).join('')}
+          </select></div>
+        <div><label class="text-sm font-medium text-gray-700">🎯 Target role</label>
+          <input id="q-roleTarget" value="${q.roleTarget||''}" class="mt-1 w-full border border-gray-300 rounded-xl p-2 text-sm" placeholder="e.g. Senior Product Manager" /></div>
+        <div><label class="text-sm font-medium text-gray-700">📍 Location preference</label>
+          <input id="q-locationPref" value="${q.locationPref||''}" class="mt-1 w-full border border-gray-300 rounded-xl p-2 text-sm" placeholder="Remote, NYC, Hybrid…" /></div>
+        <div><label class="text-sm font-medium text-gray-700">💰 Salary floor (USD)</label>
+          <input id="q-salaryFloor" type="text" inputmode="numeric" value="${q.salaryFloor ? formatCurrency(q.salaryFloor) : ''}" class="mt-1 w-full border border-gray-300 rounded-xl p-2 text-sm" placeholder="$120,000" /></div>
+        <div class="md:col-span-2"><label class="text-sm font-medium text-gray-700">Top strengths <span class="text-xs text-indigo-600 font-normal">· suggested from assessment · comma-separated</span></label>
+          <input id="q-strengths" value="${strengths.join(', ')}" class="mt-1 w-full border border-gray-300 rounded-xl p-2 text-sm" placeholder="storytelling, analytics, leadership" /></div>
+        <div class="md:col-span-2"><label class="text-sm font-medium text-gray-700">🏢 Industries of interest</label>
+          <input id="q-industries" value="${(q.industries||[]).join(', ')}" class="mt-1 w-full border border-gray-300 rounded-xl p-2 text-sm" placeholder="SaaS, FinTech, Healthcare" /></div>
+        <div><label class="text-sm font-medium text-gray-700">⚡ What energizes you? <span class="text-xs text-indigo-600 font-normal">· suggested</span></label>
+          <textarea id="q-energizers" rows="2" class="mt-1 w-full border border-gray-300 rounded-xl p-2 text-sm">${energizers}</textarea></div>
+        <div><label class="text-sm font-medium text-gray-700">🪫 What drains you? <span class="text-xs text-indigo-600 font-normal">· suggested</span></label>
+          <textarea id="q-drainers" rows="2" class="mt-1 w-full border border-gray-300 rounded-xl p-2 text-sm">${drainers}</textarea></div>
       </div>
+      <button data-action="save-questionnaire" class="btn btn-primary mt-5">${analyzed ? '🔄 Update & re-analyze profile' : '✨ Save & analyze profile →'}</button>
     </div>
   </div>`;
 }
@@ -1099,6 +1200,48 @@ function bigFiveState() {
   return (state.assessment ||= { idx: 0, answers: {} });
 }
 
+// Maps Big Five scores to reasonable defaults for the practical-profile
+// questionnaire fields. Used to pre-fill the Get Started "finish your profile"
+// form after the assessment completes, so users don't start from a blank
+// page. Users can edit any of these before saving.
+function inferFromBigFive(scores) {
+  const s = scores || {};
+  const out = { workStyle: '', strengths: [], energizers: '', drainers: '' };
+
+  if (s.E >= 60 && s.C >= 60)       out.workStyle = 'fast-paced';
+  else if (s.E >= 60)                out.workStyle = 'collaborative';
+  else if (s.C >= 60)                out.workStyle = 'structured';
+  else if (s.E <= 40 && s.C <= 40)   out.workStyle = 'deep-focus';
+  else                               out.workStyle = 'hybrid';
+
+  // Top-scoring traits surface as strengths phrasing
+  const traitPhrases = [
+    ['O', s.O, 'curious thinker, drawn to new ideas'],
+    ['C', s.C, 'disciplined executor who follows through'],
+    ['E', s.E, 'strong relationship-builder and communicator'],
+    ['A', s.A, 'collaborative, seeks win-win outcomes'],
+    ['N', s.N, 'steady under pressure'],
+  ];
+  out.strengths = traitPhrases
+    .filter(([, score]) => score >= 55)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 4)
+    .map(([, , phrase]) => phrase);
+
+  if (s.E >= 60) {
+    out.energizers = 'Group discussions, meeting new people, cross-functional collaboration';
+    out.drainers   = 'Long solo work blocks, rigid processes, limited interaction';
+  } else if (s.E <= 40) {
+    out.energizers = 'Deep-focus work, one-on-one conversations, solving complex problems';
+    out.drainers   = 'Back-to-back meetings, group brainstorming, constant context-switching';
+  } else {
+    out.energizers = 'A mix of collaborative and focused work';
+    out.drainers   = 'Extremes in either direction';
+  }
+
+  return out;
+}
+
 // Takes { questionId: 1..5 } and produces { O: 0..100, C: ..., E: ..., A: ..., N: ... }.
 // For Emotional Stability we invert the raw Neuroticism score so "higher = more stable."
 function scoreBigFive(answers) {
@@ -1122,115 +1265,8 @@ function scoreBigFive(answers) {
   return raw;
 }
 
-function renderAssessment(c) {
-  const saved = c.questionnaire?.bigFive;
-  const asmt = bigFiveState();
-
-  // If we already have saved scores AND the user hasn't started a retake,
-  // show the results view.
-  if (saved && Object.keys(asmt.answers).length === 0) {
-    return renderAssessmentResults(saved, true);
-  }
-
-  // Fresh start
-  if (Object.keys(asmt.answers).length === 0 && asmt.idx === 0 && !asmt._started) {
-    return renderAssessmentIntro(saved);
-  }
-
-  const total = BIG_FIVE_QUESTIONS.length;
-  const idx   = Math.min(asmt.idx, total - 1);
-  const q     = BIG_FIVE_QUESTIONS[idx];
-  const pickedVal = asmt.answers[q.id];
-  const pct   = Math.round(((idx) / total) * 100);
-  const answered = Object.keys(asmt.answers).length;
-  const allAnswered = answered === total;
-
-  return `
-  <div class="max-w-2xl mx-auto">
-    <div class="card p-6">
-      <div class="flex items-center justify-between text-xs text-gray-500 mb-2">
-        <span>Question ${idx + 1} of ${total}</span>
-        <span>${answered} answered</span>
-      </div>
-      <div class="progress-bar mb-6"><div class="progress-fill" style="width:${pct}%"></div></div>
-
-      <div class="text-xs uppercase tracking-wide font-semibold text-[#4f46e5] mb-2">${TRAIT_META[q.trait].name}</div>
-      <h2 class="font-headline text-2xl leading-snug mb-6">${q.text}</h2>
-
-      <div class="space-y-2">
-        ${LIKERT_OPTIONS.map(opt => `
-          <button data-action="answer-question" data-question="${q.id}" data-value="${opt.v}"
-            class="w-full text-left px-4 py-3 rounded-xl border transition ${pickedVal === opt.v ? 'bg-[#eef2ff] border-[#4f46e5] text-[#3730a3] font-semibold' : 'bg-[#ffffff] border-[#e5e7eb] hover:border-[#4f46e5]'}">
-            ${opt.label}
-          </button>`).join('')}
-      </div>
-
-      <div class="flex items-center justify-between mt-6">
-        <button data-action="prev-question" class="btn btn-secondary ${idx === 0 ? 'opacity-40 pointer-events-none' : ''}">← Back</button>
-        ${idx < total - 1
-          ? `<button data-action="next-question" class="btn btn-primary ${pickedVal ? '' : 'opacity-40 pointer-events-none'}">Next →</button>`
-          : `<button data-action="submit-assessment" class="btn btn-primary ${allAnswered ? '' : 'opacity-40 pointer-events-none'}">See results ✨</button>`
-        }
-      </div>
-    </div>
-  </div>`;
-}
-
-function renderAssessmentIntro(saved) {
-  return `
-  <div class="max-w-2xl mx-auto">
-    <div class="card p-8 text-center">
-      <div class="text-4xl mb-3">🧭</div>
-      <h2 class="font-headline text-3xl mb-2">${saved ? 'Retake the' : 'Discover your'} work-style assessment</h2>
-      <p class="text-gray-600 mb-6 max-w-md mx-auto">25 quick questions across five dimensions. We use your answers to recommend roles that fit how you actually work. Takes about 4 minutes.</p>
-      <div class="flex flex-wrap gap-2 justify-center mb-6 text-xs">
-        ${Object.entries(TRAIT_META).map(([k,m]) => `
-          <div class="px-3 py-2 rounded-lg bg-white border border-gray-200 whitespace-nowrap">
-            <div class="font-headline font-bold text-indigo-700">${m.name}</div>
-          </div>`).join('')}
-      </div>
-      <button data-action="start-assessment" class="btn btn-primary">${saved ? 'Start over →' : 'Begin →'}</button>
-      <p class="text-xs text-gray-400 mt-4">Based on the Big Five (IPIP) framework — scientifically validated across decades of research.</p>
-    </div>
-  </div>`;
-}
-
-function renderAssessmentResults(scores, canRetake) {
-  const order = ['O','C','E','A','N'];
-  return `
-  <div class="max-w-2xl mx-auto space-y-6">
-    <div class="card p-6">
-      <h2 class="font-headline text-2xl mb-1">Your work-style profile</h2>
-      <p class="text-sm text-gray-500 mb-5">Each trait runs 0-100. There are no "better" scores — each pattern fits different roles and environments.</p>
-      <div class="space-y-5">
-        ${order.map(k => {
-          const s = scores[k] ?? 0;
-          const m = TRAIT_META[k];
-          const leaning = s >= 60 ? m.high : s <= 40 ? m.low : 'Balanced';
-          return `
-          <div>
-            <div class="flex items-baseline justify-between mb-1">
-              <div><span class="font-headline font-bold text-[#1a1410]">${m.name}</span> <span class="text-xs text-gray-500 ml-1">— ${m.desc}</span></div>
-              <span class="font-headline font-bold text-lg">${s}<span class="text-sm text-gray-400">/100</span></span>
-            </div>
-            <div class="progress-bar" style="height:10px;"><div class="progress-fill" style="width:${s}%"></div></div>
-            <div class="mt-1 text-xs text-[#3730a3] font-semibold">${leaning}</div>
-          </div>`;
-        }).join('')}
-      </div>
-    </div>
-
-    <div class="card p-6 text-center">
-      <div class="text-3xl mb-2">✨</div>
-      <h3 class="font-headline text-xl mb-1">Factor this into your career analysis</h3>
-      <p class="text-sm text-gray-600 mb-4">Add these results to your profile and re-run the AI analysis. Role recommendations will now account for your work style, not just your resume.</p>
-      <div class="flex gap-2 justify-center">
-        <button data-action="analyze-with-assessment" class="btn btn-primary">Re-analyze with assessment ✨</button>
-        ${canRetake ? `<button data-action="start-assessment" class="btn btn-secondary">Retake</button>` : ''}
-      </div>
-    </div>
-  </div>`;
-}
+// (renderAssessment / renderAssessmentIntro / renderAssessmentResults were
+//  removed — the assessment is now part of the Get Started flow above.)
 
 // ── PROFILE  ───────────────────────────────────────────────────────────
 // Splits "Jane Smith Doe" into { first: "Jane", last: "Smith Doe" } so
@@ -1317,6 +1353,12 @@ function renderProfile(c) {
 function jobUI(id) { return (state.jobUI ||= {}) [id] ||= { details: false, apply: false }; }
 function toggleJobUI(id, key) { const s = jobUI(id); s[key] = !s[key]; render(); }
 
+// Selection mode state for bulk operations on the job list. `selected` is a
+// Set of job IDs. Cleared whenever we exit select mode.
+function jobsSelectState() {
+  return (state.jobsSelect ||= { mode: false, selected: new Set() });
+}
+
 // Stable signature for deduping a job across searches. Each fresh search
 // generates new random IDs, so we can't use job.id — we fall back to the
 // URL (unique per posting) or a normalized title+company+location hash.
@@ -1350,14 +1392,31 @@ function renderStarRating(r) {
 function renderJobs(c) {
   if (!c.profile?.analyzed) return `<div class="card p-8 text-center"><p class="text-gray-600">Complete your intake first to unlock job search.</p></div>`;
   const jobs = c.jobs || [];
+  const sel = jobsSelectState();
+  const selCount = sel.selected.size;
+  const allSelected = jobs.length > 0 && selCount === jobs.length;
   return `
   <div class="flex flex-wrap items-center justify-between gap-3 mb-6">
     <div><h2 class="text-2xl font-bold font-headline">Job search</h2><p class="text-sm text-gray-500">Live matches based on your profile.</p></div>
     <div class="flex gap-2">
       <button data-action="toggle-alerts" class="btn btn-secondary">${c.dailyAlerts?'🔔 Alerts on':'🔕 Daily alerts'}</button>
+      ${jobs.length > 0 ? `<button data-action="toggle-select-mode" class="btn btn-secondary">${sel.mode ? '✕ Cancel' : '✓ Select'}</button>` : ''}
       <button data-action="search-jobs" id="searchBtn" class="btn btn-primary">🔍 Find jobs now</button>
     </div>
   </div>
+  ${sel.mode ? `
+    <div class="card p-3 mb-4 bg-indigo-50 border-indigo-100 flex flex-wrap items-center gap-3">
+      <button data-action="toggle-select-all" class="btn btn-secondary text-xs">
+        ${allSelected ? '☑️ Deselect all' : '☐ Select all'}
+      </button>
+      <span class="text-sm text-indigo-900"><b>${selCount}</b> of ${jobs.length} selected</span>
+      <div class="ml-auto flex gap-2">
+        <button data-action="delete-selected-jobs" class="btn ${selCount > 0 ? 'btn-primary' : 'btn-secondary opacity-50 pointer-events-none'}" style="background:#dc2626">
+          🗑 Delete ${selCount > 0 ? `${selCount} selected` : 'selected'}
+        </button>
+      </div>
+    </div>` : ''
+  }
   <div id="searchStatus"></div>
   ${jobs.length === 0
     ? `<div class="card p-10 text-center"><div class="text-5xl mb-3">🎯</div><p class="text-gray-500">No jobs yet. Click <b>Find jobs now</b> to pull fresh matches.</p></div>`
@@ -1369,9 +1428,16 @@ function renderJobCard(j, c) {
   const ui = jobUI(j.id);
   const submitted = j.extra?.submission?.submitted;
   const generated = j.extra?.application?.generated;
+  const sel = jobsSelectState();
+  const checked = sel.selected.has(j.id);
   return `
-  <div class="card p-5">
+  <div class="card p-5 ${sel.mode && checked ? 'ring-2 ring-indigo-500' : ''}">
     <div class="flex items-start gap-4">
+      ${sel.mode ? `
+        <label class="flex items-center shrink-0 cursor-pointer pt-2">
+          <input type="checkbox" data-action="toggle-job-select" data-job="${j.id}" ${checked ? 'checked' : ''}
+            class="w-5 h-5 accent-indigo-600 cursor-pointer">
+        </label>` : ''}
       ${companyLogo(j)}
       <div class="flex-1 min-w-0">
         <div class="flex flex-wrap items-start justify-between gap-2">
@@ -1898,32 +1964,22 @@ async function handleAction(e) {
         break;
       }
       const scores = scoreBigFive(asmt.answers);
-      // Save to the questionnaire so it persists and flows into future analyses
+      // Save the scores, then reset the transient quiz state so the
+      // Get Started view advances to Phase 2 (practical profile fields).
       await saveClientProfile({
         questionnaire: { ...(c.questionnaire || {}), bigFive: scores, bigFiveAt: new Date().toISOString() },
       });
-      // Reset the transient quiz state so the Results view renders from saved data
       state.assessment = { idx: 0, answers: {} };
       render();
+      showToast('✓ Assessment saved — now finish your profile');
       break; }
 
-    case 'analyze-with-assessment': {
-      if (!c.questionnaire?.bigFive) { showToast('Take the assessment first', 'red'); break; }
-      el.disabled = true; el.innerHTML = '<span class="spinner"></span> Re-analyzing with Claude…';
-      try {
-        const resp = await scriptCall({
-          action: 'analyze_profile',
-          email: viewedEmail(),
-          questionnaire: c.questionnaire || {},
-        });
-        const profile = resp.configured && resp.profile ? resp.profile : mockAnalyzeProfile(c.questionnaire || {});
-        if (!resp.configured) showToast('Using sample analysis — set ANTHROPIC_API_KEY for real output', 'red');
-        await saveClientProfile({ profile });
-        setState({ tab: 'profile' });
-      } catch (e) {
-        console.error(e);
-        showToast('Analysis failed — ' + (e.message || 'see console'), 'red');
-      }
+    case 'retake-assessment': {
+      // Reset the transient quiz state and re-render. Existing bigFive scores
+      // stay in the questionnaire until the user finishes a fresh quiz and
+      // submits — at which point they get overwritten.
+      state.assessment = { idx: 0, answers: {}, _started: true };
+      render();
       break; }
 
     case 'save-display-name': {
@@ -2039,6 +2095,48 @@ async function handleAction(e) {
         c.jobs = c.jobs.filter(j => j.id !== jid);
         render();
         showToast('Job deleted');
+      } catch (e) {
+        console.error(e);
+        showToast('Delete failed — ' + (e.message || 'see console'), 'red');
+      }
+      break; }
+
+    case 'toggle-select-mode': {
+      const sel = jobsSelectState();
+      sel.mode = !sel.mode;
+      if (!sel.mode) sel.selected.clear();
+      render();
+      break; }
+
+    case 'toggle-job-select': {
+      const sel = jobsSelectState();
+      const jid = el.dataset.job;
+      if (sel.selected.has(jid)) sel.selected.delete(jid);
+      else sel.selected.add(jid);
+      render();
+      break; }
+
+    case 'toggle-select-all': {
+      const sel = jobsSelectState();
+      const allIds = (c.jobs || []).map(j => j.id);
+      const allSelected = allIds.length > 0 && sel.selected.size === allIds.length;
+      sel.selected = allSelected ? new Set() : new Set(allIds);
+      render();
+      break; }
+
+    case 'delete-selected-jobs': {
+      const sel = jobsSelectState();
+      const ids = Array.from(sel.selected);
+      if (ids.length === 0) break;
+      if (!confirm(`Delete ${ids.length} job${ids.length>1?'s':''}? This can't be undone.`)) break;
+      el.disabled = true; el.innerHTML = '<span class="spinner"></span> Deleting…';
+      try {
+        await scriptCall({ action: 'delete_jobs_bulk', email: viewedEmail(), jobIds: ids });
+        c.jobs = (c.jobs || []).filter(j => !sel.selected.has(j.id));
+        sel.selected.clear();
+        sel.mode = false;
+        render();
+        showToast(`Deleted ${ids.length} job${ids.length>1?'s':''}`);
       } catch (e) {
         console.error(e);
         showToast('Delete failed — ' + (e.message || 'see console'), 'red');
