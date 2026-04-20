@@ -988,6 +988,46 @@ async function voiceEndTake() {
   }
   v.phase = 'review';
   render();
+
+  // Persist the take so it shows up on the Progress dashboard. We pack the
+  // extra telemetry (drill id, xp, wpm, fillerCount, etc.) into the `note`
+  // field as JSON — keeps the sheet schema simple while carrying enough
+  // detail to compute badges, streaks, and per-drill history.
+  try {
+    const review = v.review || {};
+    const noteBlob = {
+      drillId:      drill.id,
+      drillTitle:   drill.title,
+      drillCategory: drill.category,
+      xp:           review.xp || 0,
+      words:        review.stats?.words || 0,
+      wpm:          review.stats?.wpm || 0,
+      fillerCount:  review.stats?.fillerCount || 0,
+      durationSec:  review.stats?.durationSec || elapsed,
+      verdict:      (review.verdict || '').slice(0, 400),
+      flags:        (review.lines || []).map(l => l.flag).filter(Boolean),
+      at:           new Date().toISOString(),
+    };
+    const session = {
+      id:     'vc_' + Date.now(),
+      type:   drill.category || 'Voice Coach',
+      status: 'done',
+      score:  review.score || 0,
+      note:   JSON.stringify(noteBlob),
+    };
+    await savePrepSession(session);
+    // Mirror into local state so Progress tab reflects the new session
+    // without a reload
+    const c = state.client;
+    if (c) {
+      c.interviewPrep = c.interviewPrep || { sessions: [], completed: 0, total: 0 };
+      c.interviewPrep.sessions.push(session);
+      c.interviewPrep.completed = (c.interviewPrep.completed || 0) + 1;
+      c.interviewPrep.total     = c.interviewPrep.sessions.length;
+    }
+  } catch (e) {
+    console.warn('[save-prep-session] non-fatal:', e);
+  }
 }
 
 // Simple mock review for when Claude isn't available. Good enough to drive
@@ -1272,7 +1312,7 @@ function renderClientTabs() {
     ['intake','✨ Get Started'],
     ['profile','My Profile'],
     ['jobs','Job Search'],
-    ['prep','Interview Prep'],
+    ['prep','🎯 Progress'],
     ['voice','🎙️ Voice Coach'],
     ['dashboard','Dashboard'],
   ];
@@ -1683,7 +1723,7 @@ function renderProfile(c) {
         <h3 class="font-bold mb-3">Quick actions</h3>
         <div class="space-y-2">
           <button data-action="set-tab" data-tab="jobs" class="btn btn-secondary w-full text-left">🔍 Find matching jobs</button>
-          <button data-action="set-tab" data-tab="prep" class="btn btn-secondary w-full text-left">📋 Interview prep plan</button>
+          <button data-action="set-tab" data-tab="prep" class="btn btn-secondary w-full text-left">🎯 My progress</button>
           <button data-action="set-tab" data-tab="voice" class="btn btn-secondary w-full text-left">🎙️ Voice coach</button>
         </div>
       </div>
@@ -2393,60 +2433,247 @@ function renderMaterialBlock(label, key, content, jobId) {
   </div>`;
 }
 
-// ── PREP  ──────────────────────────────────────────────────────────────
+// ── PROGRESS (formerly Interview Prep) ────────────────────────────────
+// Gamified dashboard that surfaces Voice Coach work: total XP, level,
+// streak, achievements, per-drill history. All data is derived from
+// PrepSessions rows saved when each take finishes.
+
+// Level thresholds — cumulative XP required to unlock each level.
+// Tuned so levels feel meaningful but reachable: ~2 drills = Level 2.
+const LEVEL_THRESHOLDS = [0, 200, 500, 1000, 1800, 3000, 5000, 8000];
+
+function levelFromXP(xp) {
+  let lvl = 1;
+  for (let i = 1; i < LEVEL_THRESHOLDS.length; i++) {
+    if (xp >= LEVEL_THRESHOLDS[i]) lvl = i + 1;
+  }
+  return {
+    level: lvl,
+    current: xp,
+    nextThreshold: LEVEL_THRESHOLDS[lvl] || null,
+    prevThreshold: LEVEL_THRESHOLDS[lvl - 1] || 0,
+  };
+}
+
+// Parses a prep session's `note` JSON blob (produced by voiceEndTake) into
+// a richer object. Older rows without JSON notes get a minimal record.
+function parsePrepSession(s) {
+  let meta = {};
+  try { meta = s.note && s.note.startsWith('{') ? JSON.parse(s.note) : {}; }
+  catch (_) { meta = {}; }
+  return {
+    id:        s.id,
+    type:      s.type,
+    status:    s.status,
+    score:     s.score || 0,
+    xp:        meta.xp || 0,
+    wpm:       meta.wpm || 0,
+    fillerCount: meta.fillerCount || 0,
+    durationSec: meta.durationSec || 0,
+    words:     meta.words || 0,
+    verdict:   meta.verdict || '',
+    flags:     meta.flags || [],
+    drillId:   meta.drillId || s.id,
+    drillTitle:meta.drillTitle || s.type || 'Practice session',
+    drillCategory: meta.drillCategory || s.type || '',
+    at:        meta.at ? new Date(meta.at) : null,
+  };
+}
+
+// Computes the current streak — consecutive days (ending today or yesterday)
+// with at least one saved session. A "day" is the local-date of the `at` field.
+function computeStreak(sessions) {
+  const dates = new Set(
+    sessions
+      .map(s => s.at)
+      .filter(Boolean)
+      .map(d => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime())
+  );
+  if (!dates.size) return 0;
+  const msPerDay = 86400000;
+  const today = new Date(); today.setHours(0,0,0,0);
+  let streak = 0;
+  let cursor = today.getTime();
+  // If there's no session today, allow yesterday as the start (so a current
+  // streak doesn't reset until the user misses TWO days)
+  if (!dates.has(cursor)) cursor -= msPerDay;
+  while (dates.has(cursor)) {
+    streak += 1;
+    cursor -= msPerDay;
+  }
+  return streak;
+}
+
+// Badge catalog. Each badge has an `unlocked(sessions)` predicate.
+const BADGES = [
+  { id:'first',       emoji:'🎬', name:'First Take',        desc:'Complete your first voice drill.',
+    unlocked: s => s.length >= 1 },
+  { id:'sub3filler',  emoji:'🎯', name:'Sharp Tongue',      desc:'Finish a drill with ≤ 3 filler words.',
+    unlocked: s => s.some(x => x.fillerCount <= 3 && x.fillerCount >= 0 && x.words > 30) },
+  { id:'metric',      emoji:'📊', name:'Metric Lander',     desc:'Land a quantified result in a take.',
+    unlocked: s => s.some(x => x.flags.includes('metric')) },
+  { id:'specific',    emoji:'🔬', name:'Specificity',       desc:'Get flagged "specific" on a line.',
+    unlocked: s => s.some(x => x.flags.includes('specific')) },
+  { id:'high80',      emoji:'🔥', name:'Strong Rep',        desc:'Score 80+ on any drill.',
+    unlocked: s => s.some(x => (x.score || 0) >= 80) },
+  { id:'high90',      emoji:'⭐', name:'Standout',          desc:'Score 90+ on any drill.',
+    unlocked: s => s.some(x => (x.score || 0) >= 90) },
+  { id:'varied',      emoji:'🎨', name:'Well-Rounded',      desc:'Practice 3 different drill categories.',
+    unlocked: s => new Set(s.map(x => x.drillCategory).filter(Boolean)).size >= 3 },
+  { id:'streak3',     emoji:'⚡', name:'Consistency',       desc:'Practice on 3 different days.',
+    unlocked: s => new Set(s.map(x => x.at).filter(Boolean).map(d => d.toDateString())).size >= 3 },
+  { id:'marathon',    emoji:'🏃', name:'Marathon',          desc:'Complete 10 total drills.',
+    unlocked: s => s.length >= 10 },
+  { id:'behavioral4', emoji:'📖', name:'Storyteller',       desc:'Complete 4 behavioral drills.',
+    unlocked: s => s.filter(x => /behavioral/i.test(x.drillCategory || '')).length >= 4 },
+];
+
 function renderPrep(c) {
-  if (!c.profile?.analyzed) return `<div class="card p-8 text-center"><p class="text-gray-600">Complete intake first.</p></div>`;
-  const ip = c.interviewPrep || { sessions:[], completed:0, total:0 };
-  const pct = ip.total ? Math.round((ip.completed/ip.total)*100) : 0;
-  const defaultSessions = ip.sessions.length ? ip.sessions : [
-    { id:'ps1',type:'Behavioral / STAR storytelling',status:'todo',score:null,note:'' },
-    { id:'ps2',type:'Role-specific case / scenario',status:'todo',score:null,note:'' },
-    { id:'ps3',type:'Stakeholder or conflict roleplay',status:'todo',score:null,note:'' },
-    { id:'ps4',type:'Compensation negotiation',status:'todo',score:null,note:'' },
-    { id:'ps5',type:'Final round / exec-level',status:'todo',score:null,note:'' },
-  ];
-  const qs = mockInterviewQuestions(c, (c.jobs||[]).find(j=>j.status==='interviewing')?.title);
-  return `
-  <div class="grid md:grid-cols-3 gap-6">
-    <div class="md:col-span-2 space-y-6">
-      <div class="card p-6">
-        <div class="flex items-center justify-between mb-3">
-          <h2 class="text-xl font-bold font-headline">Prep plan</h2>
-          <span class="text-sm text-gray-500">${ip.completed}/${defaultSessions.length} done</span>
-        </div>
-        <div class="progress-bar mb-5"><div class="progress-fill" style="width:${pct}%"></div></div>
-        <div class="space-y-2">
-          ${defaultSessions.map(s=>`
-          <div class="flex items-center justify-between p-3 rounded-xl border ${s.status==='done'?'bg-green-50 border-green-100':s.status==='in_progress'?'bg-amber-50 border-amber-100':'bg-gray-50 border-gray-100'}">
-            <div>
-              <div class="font-medium text-sm text-gray-900">${s.type}</div>
-              ${s.note?`<div class="text-xs text-gray-500 mt-0.5">${s.note}</div>`:''}
-            </div>
-            <div class="flex items-center gap-3">
-              ${s.score!==null?`<span class="font-bold text-sm text-gray-700">${s.score}</span>`:''}
-              <select data-action="prep-status" data-session="${s.id}" class="text-xs border border-gray-300 rounded px-2 py-1">
-                ${['todo','in_progress','done'].map(v=>`<option value="${v}" ${s.status===v?'selected':''}>${v.replace('_',' ')}</option>`).join('')}
-              </select>
-            </div>
-          </div>`).join('')}
+  if (!c.profile?.analyzed) return `<div class="card p-8 text-center"><p class="text-gray-600">Complete your intake first to unlock Progress.</p></div>`;
+
+  const rawSessions = (c.interviewPrep?.sessions || []);
+  // Only count sessions that came from Voice Coach (vc_ prefix) or have
+  // structured JSON notes — skip the old "todo" checklist rows.
+  const sessions = rawSessions
+    .map(parsePrepSession)
+    .filter(s => s.xp > 0 || s.score > 0 || (s.note || '').startsWith('{'))
+    .sort((a, b) => (b.at?.getTime() || 0) - (a.at?.getTime() || 0));
+
+  const totalXP = sessions.reduce((n, s) => n + (s.xp || 0), 0);
+  const lvl = levelFromXP(totalXP);
+  const streak = computeStreak(sessions);
+  const avgScore = sessions.length ? Math.round(sessions.reduce((n, s) => n + (s.score || 0), 0) / sessions.length) : 0;
+  const unlockedBadges = BADGES.filter(b => b.unlocked(sessions));
+  const lockedBadges   = BADGES.filter(b => !b.unlocked(sessions));
+
+  const progressPct = lvl.nextThreshold
+    ? Math.round(((lvl.current - lvl.prevThreshold) / (lvl.nextThreshold - lvl.prevThreshold)) * 100)
+    : 100;
+
+  const xpToNext = lvl.nextThreshold ? (lvl.nextThreshold - lvl.current) : 0;
+
+  // Empty state — no takes yet
+  if (sessions.length === 0) {
+    return `
+    <div class="max-w-2xl mx-auto">
+      <div class="card p-10 text-center">
+        <div class="text-5xl mb-3">🎯</div>
+        <h2 class="font-headline font-bold text-2xl mb-2">Your progress starts here</h2>
+        <p class="text-sm text-gray-600 mb-5 max-w-md mx-auto">Finish your first Voice Coach drill and you'll start earning XP, unlocking badges, and building a streak. Everything you do there shows up here.</p>
+        <button data-action="set-tab" data-tab="voice" class="btn btn-primary">Practice your first drill →</button>
+      </div>
+      <!-- Preview of badges you could unlock -->
+      <div class="mt-6 card p-5">
+        <div class="text-xs uppercase tracking-wider text-gray-500 font-semibold mb-3">Badges to earn</div>
+        <div class="grid grid-cols-2 sm:grid-cols-5 gap-3">
+          ${BADGES.slice(0, 5).map(b => `
+            <div class="text-center p-3 rounded-xl bg-gray-50 border border-gray-100 opacity-50">
+              <div class="text-2xl mb-1">${b.emoji}</div>
+              <div class="text-xs font-semibold text-gray-700">${b.name}</div>
+            </div>`).join('')}
         </div>
       </div>
-      <div class="card p-6">
-        <h3 class="font-bold mb-3">Tailored questions</h3>
-        <ul class="space-y-2 text-sm text-gray-700">${qs.scenarios.map(q=>`<li class="flex gap-2"><span class="text-[#4f46e5] font-bold shrink-0">Q.</span>${q}</li>`).join('')}</ul>
-        <h4 class="font-bold mt-5 mb-2">Common questions</h4>
-        <ul class="space-y-1 text-sm text-gray-700">${qs.common.map(q=>`<li>• ${q}</li>`).join('')}</ul>
+    </div>`;
+  }
+
+  return `
+  <div class="max-w-5xl mx-auto space-y-6">
+    <!-- Hero: level + XP + streak -->
+    <div class="card p-6 brand-grad text-white">
+      <div class="flex flex-wrap items-end justify-between gap-6">
+        <div>
+          <div class="text-xs uppercase tracking-widest opacity-80">Level</div>
+          <div class="font-headline font-bold" style="font-size:72px;line-height:1;">${lvl.level}</div>
+          <div class="text-sm opacity-90 mt-1">${totalXP.toLocaleString()} XP total</div>
+        </div>
+        <div class="flex-1 min-w-[200px] max-w-md">
+          <div class="flex justify-between text-xs opacity-80 mb-1">
+            <span>Level ${lvl.level}</span>
+            ${lvl.nextThreshold ? `<span>Level ${lvl.level + 1} · ${xpToNext} XP to go</span>` : `<span>MAX LEVEL</span>`}
+          </div>
+          <div class="h-2 bg-white/20 rounded-full overflow-hidden">
+            <div class="h-full bg-white rounded-full" style="width:${progressPct}%"></div>
+          </div>
+        </div>
+        <div class="text-center">
+          <div class="font-headline font-bold text-4xl">🔥 ${streak}</div>
+          <div class="text-xs opacity-80 uppercase tracking-wide">${streak === 1 ? 'Day streak' : 'Day streak'}</div>
+        </div>
+      </div>
+      <div class="mt-5 pt-5 border-t border-white/20 grid grid-cols-3 gap-4 text-sm">
+        <div>
+          <div class="opacity-70 text-xs uppercase tracking-wide">Drills completed</div>
+          <div class="font-bold text-lg mt-0.5">${sessions.length}</div>
+        </div>
+        <div>
+          <div class="opacity-70 text-xs uppercase tracking-wide">Avg score</div>
+          <div class="font-bold text-lg mt-0.5">${avgScore}/100</div>
+        </div>
+        <div>
+          <div class="opacity-70 text-xs uppercase tracking-wide">Badges</div>
+          <div class="font-bold text-lg mt-0.5">${unlockedBadges.length}/${BADGES.length}</div>
+        </div>
       </div>
     </div>
-    <div class="space-y-5">
-      <div class="card p-6">
-        <h3 class="font-bold mb-3">Coaching tips</h3>
-        <ul class="space-y-2 text-sm">${qs.tips.map(t=>`<li class="flex gap-2"><span class="text-[#06b6d4] shrink-0">💡</span>${t}</li>`).join('')}</ul>
+
+    <!-- Next action CTA -->
+    <div class="card p-5 flex flex-wrap items-center justify-between gap-4">
+      <div>
+        <h3 class="font-headline font-bold text-lg">${streak > 0 ? 'Keep the streak alive' : 'Start a new streak'}</h3>
+        <p class="text-sm text-gray-600 mt-0.5">One more drill earns XP, may unlock a badge, and keeps your momentum.</p>
       </div>
-      <div class="card p-6 brand-grad text-white">
-        <h3 class="font-bold">Practice with your coach</h3>
-        <p class="text-sm opacity-90 mt-1">Book a live mock interview session tailored to a specific role.</p>
-        <a href="mailto:${CONFIG.COACH_EMAILS[0]}?subject=Mock interview request" class="inline-block mt-3 bg-white text-[#3730a3] font-semibold rounded-xl px-4 py-2 text-sm">Request session</a>
+      <button data-action="set-tab" data-tab="voice" class="btn btn-primary">Practice now →</button>
+    </div>
+
+    <!-- Badges -->
+    <div>
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="font-headline font-bold">🏆 Achievements</h3>
+        <span class="text-xs text-gray-500">${unlockedBadges.length} of ${BADGES.length} unlocked</span>
+      </div>
+      <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+        ${unlockedBadges.map(b => `
+          <div class="text-center p-4 rounded-xl bg-white border-2 border-indigo-200 shadow-sm" title="${b.desc}">
+            <div class="text-3xl mb-1">${b.emoji}</div>
+            <div class="text-xs font-bold text-gray-900">${b.name}</div>
+            <div class="text-[10px] text-gray-500 mt-0.5">${b.desc}</div>
+          </div>`).join('')}
+        ${lockedBadges.map(b => `
+          <div class="text-center p-4 rounded-xl bg-gray-50 border border-gray-200 opacity-50" title="${b.desc}">
+            <div class="text-3xl mb-1 grayscale">${b.emoji}</div>
+            <div class="text-xs font-bold text-gray-700">${b.name}</div>
+            <div class="text-[10px] text-gray-500 mt-0.5">${b.desc}</div>
+          </div>`).join('')}
+      </div>
+    </div>
+
+    <!-- Recent sessions -->
+    <div>
+      <h3 class="font-headline font-bold mb-3">Recent sessions</h3>
+      <div class="card p-0 divide-y divide-gray-100">
+        ${sessions.slice(0, 12).map(s => {
+          const dateStr = s.at ? s.at.toLocaleDateString(undefined, { month:'short', day:'numeric' }) : '';
+          const timeStr = s.at ? s.at.toLocaleTimeString(undefined, { hour:'numeric', minute:'2-digit' }) : '';
+          const scoreColor = s.score >= 85 ? 'text-green-600' : s.score >= 70 ? 'text-indigo-600' : s.score >= 50 ? 'text-amber-600' : 'text-red-600';
+          return `
+          <div class="p-4 flex flex-wrap items-center gap-3">
+            <div class="flex-1 min-w-0">
+              <div class="font-semibold text-gray-900 text-sm leading-tight">${s.drillTitle}</div>
+              <div class="text-xs text-gray-500 mt-0.5">${s.drillCategory || 'Practice'} · ${dateStr}${timeStr ? ' · ' + timeStr : ''}</div>
+              ${s.verdict ? `<div class="text-xs text-gray-600 italic mt-1">"${s.verdict}"</div>` : ''}
+            </div>
+            <div class="flex items-center gap-4 shrink-0">
+              <div class="text-center">
+                <div class="text-[10px] uppercase tracking-wider text-gray-400">Score</div>
+                <div class="font-bold ${scoreColor}">${s.score || 0}</div>
+              </div>
+              <div class="text-center">
+                <div class="text-[10px] uppercase tracking-wider text-gray-400">XP</div>
+                <div class="font-bold text-indigo-600">+${s.xp || 0}</div>
+              </div>
+            </div>
+          </div>`;
+        }).join('')}
       </div>
     </div>
   </div>`;
@@ -2815,10 +3042,10 @@ function renderDashboard(c) {
     </div>
     <div class="space-y-5">
       <div class="card p-6">
-        <h3 class="font-bold mb-2">Interview prep</h3>
-        <div class="text-sm text-gray-600">${prep.completed} of ${prep.total||5} sessions complete</div>
+        <h3 class="font-bold mb-2">🎯 Progress</h3>
+        <div class="text-sm text-gray-600">${prep.completed||0} practice session${prep.completed===1?'':'s'} logged</div>
         <div class="progress-bar mt-2"><div class="progress-fill" style="width:${pct}%"></div></div>
-        <button data-action="set-tab" data-tab="prep" class="btn btn-ghost mt-3 text-sm">Continue →</button>
+        <button data-action="set-tab" data-tab="prep" class="btn btn-ghost mt-3 text-sm">View →</button>
       </div>
       <div class="card p-6">
         <h3 class="font-bold mb-2">Notes</h3>
