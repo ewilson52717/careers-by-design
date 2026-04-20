@@ -1491,6 +1491,8 @@ function renderIntakePhaseProfile(c) {
         </div>`}
     </div>
 
+    ${renderExplorationPanel(c)}
+
     <!-- Practical fields, pre-filled -->
     <div class="card p-6">
       <h2 class="text-xl font-bold font-headline mb-1">✨ A few more details</h2>
@@ -1500,7 +1502,11 @@ function renderIntakePhaseProfile(c) {
           <select id="q-workStyle" class="mt-1 w-full border border-gray-300 rounded-xl p-2 text-sm">
             ${['collaborative','deep-focus','hybrid','fast-paced','structured'].map(v=>`<option ${workStyle===v?'selected':''}>${v}</option>`).join('')}
           </select></div>
-        <div><label class="text-sm font-medium text-gray-700">🎯 Target role</label>
+        <div>
+          <div class="flex items-baseline justify-between">
+            <label class="text-sm font-medium text-gray-700">🎯 Target role</label>
+            <button type="button" data-action="toggle-exploration" class="text-xs text-indigo-600 hover:text-indigo-800 hover:underline font-medium">Not sure? ✨ Explore paths</button>
+          </div>
           <input id="q-roleTarget" value="${q.roleTarget||''}" class="mt-1 w-full border border-gray-300 rounded-xl p-2 text-sm" placeholder="e.g. Senior Product Manager" /></div>
         <div><label class="text-sm font-medium text-gray-700">📍 Location preference</label>
           <input id="q-locationPref" value="${q.locationPref||''}" class="mt-1 w-full border border-gray-300 rounded-xl p-2 text-sm" placeholder="Remote, NYC, Hybrid…" /></div>
@@ -1583,6 +1589,207 @@ const TRAIT_META = {
 
 function bigFiveState() {
   return (state.assessment ||= { idx: 0, answers: {} });
+}
+
+// ── CAREER EXPLORATION  ──────────────────────────────────────────────
+// Optional deeper-probe questions for clients who don't yet know their
+// target role. Complements Big Five by surfacing preferences around
+// ambiguity tolerance, builder-vs-operator orientation, impact horizon,
+// and similar signals that map to actual role shapes.
+const EXPLORATION_QUESTIONS = [
+  { id: 'ambiguity', q: 'When a project starts with unclear scope, I:',
+    options: [
+      { v: 'dive',    label: 'Dive in and figure it out by doing' },
+      { v: 'clarify', label: 'Clarify the goal and requirements first' },
+      { v: 'both',    label: 'Both — equally comfortable either way' },
+    ] },
+  { id: 'energy', q: 'In a typical week, I\'d rather spend more time:',
+    options: [
+      { v: 'people',   label: 'Working with and through people — conversations, meetings, helping others' },
+      { v: 'focus',    label: 'Heads-down on a specific problem or deliverable' },
+      { v: 'mixed',    label: 'An even split' },
+    ] },
+  { id: 'output', q: 'I\'m drawn to work that:',
+    options: [
+      { v: 'artifact', label: 'Produces a visible thing I can point at (a product, report, design)' },
+      { v: 'system',   label: 'Keeps a complex system running smoothly (ops, process, infrastructure)' },
+      { v: 'people',   label: 'Directly changes specific people\'s outcomes (coaching, clients, patients)' },
+    ] },
+  { id: 'known', q: 'I want to be known for:',
+    options: [
+      { v: 'depth',   label: 'Deep expertise in one thing' },
+      { v: 'breadth', label: 'Connecting dots across many domains' },
+      { v: 'lead',    label: 'Leading people through change' },
+    ] },
+  { id: 'approach', q: 'When I hit a hard problem, my first instinct is to:',
+    options: [
+      { v: 'data',      label: 'Look at the data' },
+      { v: 'people',    label: 'Talk to others who might know' },
+      { v: 'prototype', label: 'Sketch, prototype, or experiment' },
+    ] },
+  { id: 'horizon', q: 'Over a career, I want to:',
+    options: [
+      { v: 'leader',  label: 'Climb into senior leadership' },
+      { v: 'master',  label: 'Keep deepening a craft I\'m known for' },
+      { v: 'founder', label: 'Start my own thing eventually' },
+      { v: 'unsure',  label: 'I\'m not sure yet' },
+    ] },
+  { id: 'pullaway', q: 'What pulls you off-track fastest?',
+    options: [
+      { v: 'routine',      label: 'Repetitive, routine work' },
+      { v: 'contextswitch',label: 'Constant context-switching' },
+      { v: 'unclear',      label: 'Unclear expectations' },
+      { v: 'isolation',    label: 'Working alone for too long' },
+    ] },
+  { id: 'happiest', q: 'In a recent good stretch of work, I was happiest when:',
+    options: [
+      { v: 'shipping', label: 'Shipping something new' },
+      { v: 'fixing',   label: 'Fixing something broken' },
+      { v: 'teaching', label: 'Helping a person or team level up' },
+      { v: 'analyzing',label: 'Analyzing something complex' },
+    ] },
+];
+
+function explorationState() {
+  return (state.exploration ||= { open: false, answers: {}, paths: null, loading: false });
+}
+
+function renderExplorationPanel(c) {
+  const ex = explorationState();
+  if (!ex.open && !ex.paths) return ''; // collapsed default — triggered by "Explore paths" button
+
+  // Three sub-states: filling out questions, loading paths, showing paths
+  if (ex.loading) {
+    return `
+    <div class="card p-8 text-center">
+      <div class="text-3xl mb-2">✨</div>
+      <h3 class="font-headline font-bold text-xl mb-1">Finding roles that fit you</h3>
+      <p class="text-sm text-gray-500 mb-4">Cross-referencing your resume, work-style scores, and preferences. Usually takes 6–12 seconds.</p>
+      <div class="loading-dots inline-flex"><span></span><span></span><span></span></div>
+    </div>`;
+  }
+
+  if (ex.paths) return renderExplorationResults(ex.paths);
+
+  // Question-answering state
+  const answered = Object.keys(ex.answers).length;
+  const total = EXPLORATION_QUESTIONS.length;
+  return `
+  <div class="card p-6">
+    <div class="flex items-start justify-between gap-3 mb-4 flex-wrap">
+      <div>
+        <h2 class="text-xl font-bold font-headline">✨ Career exploration</h2>
+        <p class="text-sm text-gray-500 mt-0.5">${total} quick work-style questions. We'll suggest specific roles that match — including ones you might not have considered.</p>
+      </div>
+      <div class="flex items-center gap-3 shrink-0">
+        <span class="text-xs text-gray-500">${answered}/${total} answered</span>
+        <button type="button" data-action="toggle-exploration" class="btn btn-ghost text-xs">Close</button>
+      </div>
+    </div>
+
+    <div class="space-y-5">
+      ${EXPLORATION_QUESTIONS.map((q, i) => `
+        <div>
+          <div class="text-xs uppercase tracking-wider text-gray-500 font-semibold mb-1">Q${i+1}</div>
+          <div class="font-headline font-semibold text-sm mb-2">${q.q}</div>
+          <div class="grid sm:grid-cols-${q.options.length === 4 ? '2' : '1'} gap-2">
+            ${q.options.map(opt => {
+              const picked = ex.answers[q.id] === opt.v;
+              return `
+              <button type="button" data-action="answer-exploration" data-qid="${q.id}" data-val="${opt.v}"
+                class="text-left px-3 py-2 rounded-lg border transition text-sm ${picked ? 'bg-indigo-50 border-indigo-500 text-indigo-900 font-semibold' : 'bg-white border-gray-200 hover:border-indigo-400'}">
+                ${opt.label}
+              </button>`;
+            }).join('')}
+          </div>
+        </div>`).join('')}
+    </div>
+
+    <div class="flex items-center justify-between mt-6 pt-4 border-t border-gray-100">
+      <span class="text-xs text-gray-500">
+        ${answered < total ? `Answer ${total - answered} more to unlock recommendations` : 'All answered — ready when you are'}
+      </span>
+      <button type="button" data-action="discover-paths"
+        class="btn btn-primary text-sm ${answered < total ? 'opacity-40 pointer-events-none' : ''}">
+        Discover my paths →
+      </button>
+    </div>
+  </div>`;
+}
+
+function renderExplorationResults(paths) {
+  if (!paths || !paths.length) {
+    return `
+    <div class="card p-6 text-center">
+      <p class="text-sm text-gray-600">No path suggestions came back. <button type="button" data-action="reset-exploration" class="text-indigo-600 underline">Try again</button></p>
+    </div>`;
+  }
+  return `
+  <div class="card p-6">
+    <div class="flex items-start justify-between mb-4 gap-3 flex-wrap">
+      <div>
+        <h2 class="text-xl font-bold font-headline">🎯 Your career paths</h2>
+        <p class="text-sm text-gray-500 mt-0.5">Tap any path to set it as your Target Role. You can explore again anytime.</p>
+      </div>
+      <div class="flex gap-2 shrink-0">
+        <button type="button" data-action="reset-exploration" class="btn btn-ghost text-xs">← Redo questions</button>
+        <button type="button" data-action="toggle-exploration" class="btn btn-ghost text-xs">Close</button>
+      </div>
+    </div>
+
+    <div class="space-y-4">
+      ${paths.map((p, i) => `
+        <div class="rounded-2xl border border-gray-200 hover:border-indigo-400 bg-white p-5 transition">
+          <div class="flex items-start justify-between gap-3 mb-2 flex-wrap">
+            <div class="flex-1 min-w-0">
+              <h3 class="font-headline font-bold text-lg text-gray-900 leading-tight">${escapeHtml(p.title)}</h3>
+            </div>
+            <div class="flex items-center gap-2 shrink-0">
+              <div class="text-right">
+                <div class="text-[10px] uppercase tracking-wider text-gray-400">Fit</div>
+                <div class="font-bold text-indigo-600">${p.fit}<span class="text-gray-400 text-xs">/100</span></div>
+              </div>
+              <button type="button" data-action="choose-path" data-path-idx="${i}" class="btn btn-primary text-xs">Choose this path →</button>
+            </div>
+          </div>
+
+          ${p.whyItFits ? `
+            <div class="rounded-lg bg-indigo-50 border border-indigo-100 p-3 mb-3">
+              <div class="text-[10px] uppercase tracking-wider text-indigo-700 font-semibold mb-0.5">✨ Why it fits you</div>
+              <div class="text-sm text-indigo-900 leading-snug">${escapeHtml(p.whyItFits)}</div>
+            </div>` : ''}
+
+          ${p.dayInTheLife ? `
+            <div class="mb-3">
+              <div class="text-[10px] uppercase tracking-wider text-gray-500 font-semibold mb-1">Day in the life</div>
+              <div class="text-sm text-gray-700 leading-relaxed">${escapeHtml(p.dayInTheLife)}</div>
+            </div>` : ''}
+
+          ${p.firstSteps ? `
+            <div class="mb-3">
+              <div class="text-[10px] uppercase tracking-wider text-gray-500 font-semibold mb-1">How to get in from here</div>
+              <div class="text-sm text-gray-700 leading-relaxed">${escapeHtml(p.firstSteps)}</div>
+            </div>` : ''}
+
+          <div class="grid sm:grid-cols-2 gap-3 pt-3 border-t border-gray-100">
+            ${(p.adjacentRoles || []).length ? `
+              <div>
+                <div class="text-[10px] uppercase tracking-wider text-gray-500 font-semibold mb-1">Adjacent roles to consider</div>
+                <div class="flex flex-wrap gap-1.5">
+                  ${p.adjacentRoles.map(r => `<span class="chip chip-gray text-xs">${escapeHtml(r)}</span>`).join('')}
+                </div>
+              </div>` : ''}
+            ${(p.signalsToCheck || []).length ? `
+              <div>
+                <div class="text-[10px] uppercase tracking-wider text-gray-500 font-semibold mb-1">Check these before committing</div>
+                <ul class="text-xs text-gray-700 space-y-0.5">
+                  ${p.signalsToCheck.map(s => `<li class="flex gap-1.5"><span class="text-indigo-600">·</span><span>${escapeHtml(s)}</span></li>`).join('')}
+                </ul>
+              </div>` : ''}
+          </div>
+        </div>`).join('')}
+    </div>
+  </div>`;
 }
 
 // Maps Big Five scores to reasonable defaults for the practical-profile
@@ -3292,6 +3499,95 @@ async function handleAction(e) {
       render();
       break; }
 
+    // Career exploration (optional "not sure what I want" branch) ─────
+    case 'toggle-exploration': {
+      const ex = explorationState();
+      ex.open = !ex.open;
+      // Don't nuke answers when toggling — let users reopen without redoing work
+      render();
+      break; }
+
+    case 'answer-exploration': {
+      const ex = explorationState();
+      ex.answers[el.dataset.qid] = el.dataset.val;
+      render();
+      break; }
+
+    case 'reset-exploration': {
+      const ex = explorationState();
+      ex.paths = null;
+      ex.answers = {};
+      ex.open = true;
+      render();
+      break; }
+
+    case 'discover-paths': {
+      const ex = explorationState();
+      const need = EXPLORATION_QUESTIONS.length;
+      if (Object.keys(ex.answers).length < need) {
+        showToast('Answer every question first', 'red');
+        break;
+      }
+      ex.loading = true;
+      render();
+      try {
+        // Include any fields the user has already typed in the form so Claude
+        // sees the freshest data, not just what was saved to the sheet.
+        const qInput = {
+          ...(c.questionnaire || {}),
+          roleTarget:   document.getElementById('q-roleTarget')?.value?.trim() || (c.questionnaire?.roleTarget || ''),
+          locationPref: document.getElementById('q-locationPref')?.value?.trim() || (c.questionnaire?.locationPref || ''),
+          salaryFloor:  parseCurrency(document.getElementById('q-salaryFloor')?.value) || c.questionnaire?.salaryFloor,
+          strengths:    (document.getElementById('q-strengths')?.value || '').split(',').map(s=>s.trim()).filter(Boolean),
+          industries:   (document.getElementById('q-industries')?.value || '').split(',').map(s=>s.trim()).filter(Boolean),
+          energizers:   document.getElementById('q-energizers')?.value?.trim() || (c.questionnaire?.energizers || ''),
+          drainers:     document.getElementById('q-drainers')?.value?.trim() || (c.questionnaire?.drainers || ''),
+        };
+        const resp = await scriptCall({
+          action: 'explore_careers',
+          email: viewedEmail(),
+          questionnaire: qInput,
+          explorationAnswers: ex.answers,
+        });
+        if (resp.configured && Array.isArray(resp.paths)) {
+          ex.paths = resp.paths;
+        } else {
+          ex.paths = [];
+          showToast('Path exploration not configured', 'red');
+        }
+      } catch (e) {
+        console.error(e);
+        ex.paths = [];
+        showToast('Exploration failed — ' + (e.message || 'see console'), 'red');
+      } finally {
+        ex.loading = false;
+        render();
+      }
+      break; }
+
+    case 'choose-path': {
+      const ex = explorationState();
+      const idx = parseInt(el.dataset.pathIdx, 10);
+      const path = (ex.paths || [])[idx];
+      if (!path) break;
+      // Fill Target Role (and preserve any existing user input in other fields)
+      const roleInput = document.getElementById('q-roleTarget');
+      if (roleInput) roleInput.value = path.title;
+      // Close exploration but KEEP answers so user can revisit if they change their mind
+      ex.open = false;
+      ex.paths = null;
+      render();
+      // Scroll to the target-role field so they can see it populated
+      setTimeout(() => {
+        const el2 = document.getElementById('q-roleTarget');
+        if (el2) {
+          el2.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          el2.focus();
+        }
+      }, 60);
+      showToast(`🎯 Target role set to "${path.title}" — save & analyze when ready`);
+      break; }
+
     case 'save-display-name': {
       const first = document.getElementById('display-first-name')?.value?.trim() || '';
       const last  = document.getElementById('display-last-name')?.value?.trim() || '';
@@ -3314,6 +3610,9 @@ async function handleAction(e) {
       await saveClientProfile({ resume:{uploaded:false,summary:'',fileName:''}, questionnaire:{...(c.questionnaire||{}),resumeSummary:'',resumeFile:''} }); break;
 
     case 'save-questionnaire': {
+      // Keep exploration answers (if any) in the questionnaire so future
+      // analyses and path re-runs have the full picture.
+      const exAnswers = explorationState().answers;
       const q = {
         workStyle: document.getElementById('q-workStyle')?.value,
         roleTarget: document.getElementById('q-roleTarget')?.value?.trim(),
@@ -3325,6 +3624,8 @@ async function handleAction(e) {
         drainers: document.getElementById('q-drainers')?.value?.trim(),
         resumeSummary: c.questionnaire?.resumeSummary,
         resumeFile: c.questionnaire?.resumeFile,
+        bigFive: c.questionnaire?.bigFive,
+        exploration: Object.keys(exAnswers).length ? exAnswers : (c.questionnaire?.exploration || undefined),
       };
       if (!q.roleTarget) { showToast('Enter a target role first', 'red'); break; }
       el.disabled=true; el.innerHTML='<span class="spinner"></span> Saving & analyzing…';
