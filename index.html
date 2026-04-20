@@ -684,31 +684,87 @@ function mockInterviewQuestions(c, jobTitle) {
   };
 }
 
-// ── ⑨ VOICE COACH ENGINE  ────────────────────────────────────────────
-const VOICE_SCRIPTS = {
-  interview: {
-    title: 'Interview Practice',
-    intro: `Hi, I'm your Careers by Design voice coach. I'll run a behavioral interview practice with you using the STAR framework — Situation, Task, Action, Result. Press the mic button and answer each question aloud, just like a real interview. Ready? Let's go.`,
-    questions: [
-      { q: 'Tell me about yourself — keep it to about 90 seconds, like your professional opening statement.' },
-      { q: 'Walk me through a project you led end-to-end. What was your specific role, and what was the outcome?' },
-      { q: 'Describe a time you had a disagreement with a colleague or stakeholder. How did you handle it?' },
-      { q: 'Tell me about a time you failed or missed a goal. What did you learn from it?' },
-      { q: 'Why this role, and why now? What are you hoping your next chapter looks like?' },
+// ── ⑨ VOICE COACH — drill library, frameworks, skill axes  ────────────
+// Inspired by the Parlor teleprompter pattern: a drill picker, then a
+// focused recording session with a live transcript + framework checklist,
+// then an LLM-powered review screen.
+
+const DRILLS = [
+  { id:'tellme',    category:'Behavioral · STAR',    title:'Tell me about yourself.',                                                        tags:['Opening','Narrative','Hook'],          difficulty:1, duration:'90s' },
+  { id:'conflict',  category:'Behavioral · STAR',    title:'Tell me about a time you disagreed with your manager.',                          tags:['Conflict','Influence','Judgment'],     difficulty:2, duration:'2 min' },
+  { id:'failure',   category:'Behavioral · STAR',    title:'Walk me through your biggest professional failure.',                             tags:['Ownership','Learning','Humility'],     difficulty:3, duration:'2 min' },
+  { id:'project',   category:'Behavioral · STAR',    title:'Walk me through a project you led end-to-end.',                                  tags:['Leadership','Execution','Outcomes'],   difficulty:2, duration:'2 min' },
+  { id:'why',       category:'Behavioral · Core',    title:'Why this company, why this role, why now?',                                      tags:['Motivation','Specificity','Research'], difficulty:1, duration:'60s' },
+  { id:'ambiguity', category:'Case · Problem-solving', title:'A critical metric just dropped 30%. Walk me through your first hour.',         tags:['Prioritization','Hypothesis','Action'],difficulty:3, duration:'3 min' },
+  { id:'pitch',     category:'Executive presence',   title:'Pitch yourself in 90 seconds to a skeptical founder.',                           tags:['Narrative','Hook','Pace'],             difficulty:3, duration:'90s' },
+  { id:'salary',    category:'Negotiation',          title:'"Our budget tops out at $130K base. Is that workable?" — respond.',               tags:['Anchoring','Total comp','Poise'],      difficulty:2, duration:'60s' },
+  { id:'deflect',   category:'Negotiation',          title:'"Before I share numbers, can you tell me your salary expectations?" — respond.',  tags:['Deflection','Ranges','Poise'],         difficulty:2, duration:'45s' },
+];
+
+// For each framework, `steps` drives the auto-advancing sidebar checklist
+// during a live take. `beats` are elapsed-second thresholds at which the
+// next step activates — roughly proportional to duration.
+const FRAMEWORKS = {
+  STAR: {
+    label: 'STAR',
+    expand: 'Situation · Task · Action · Result',
+    useFor: ['conflict','failure','project','tellme'],
+    steps: [
+      { name:'Situation', hint:'Set the scene — who, when, stakes.' },
+      { name:'Task',      hint:'What you specifically owned.' },
+      { name:'Action',    hint:'Your decision + move. Use "I", not "we".' },
+      { name:'Result',    hint:'Metric. Outcome. What you learned.' },
     ],
+    beats: [0, 20, 40, 75],
   },
-  negotiation: {
-    title: 'Salary Negotiation',
-    intro: `Hello! I'm your Careers by Design negotiation coach. I'll play recruiter and walk you through five tough negotiation moments. The goal is to help you stay calm, anchor confidently, and not leave money on the table. Press the mic when you're ready to respond. Let's begin.`,
-    questions: [
-      { q: "Great news — we'd like to move forward with an offer. Before I share numbers, can you tell me your salary expectations?" },
-      { q: "Our budget tops out at one hundred and thirty thousand base. That's really the ceiling of our band. How does that sound?" },
-      { q: "I hear you, but we can't move on base. Is there anything else that would make this work?" },
-      { q: "We love you, but we're seeing candidates who'd accept the current offer as-is. Are you sure you want to hold firm?" },
-      { q: 'Okay — if we can get to one forty-five base plus a ten thousand signing bonus, can we shake hands on this today?' },
+  SCQA: {
+    label: 'SCQA',
+    expand: 'Situation · Complication · Question · Answer',
+    useFor: ['pitch','why'],
+    steps: [
+      { name:'Situation',    hint:'Context the listener already knows.' },
+      { name:'Complication', hint:'The tension or shift that matters.' },
+      { name:'Question',     hint:'The question this raises.' },
+      { name:'Answer',       hint:'Your crisp, confident answer.' },
     ],
+    beats: [0, 15, 30, 45],
+  },
+  PREP: {
+    label: 'P·R·E·P',
+    expand: 'Point · Reason · Example · Point',
+    useFor: ['salary','deflect'],
+    steps: [
+      { name:'Point',   hint:'Your anchor — what you\'re asking for.' },
+      { name:'Reason',  hint:'Why — market, scope, value.' },
+      { name:'Example', hint:'Evidence — a specific case or number.' },
+      { name:'Point',   hint:'Restate clearly. Then stay silent.' },
+    ],
+    beats: [0, 12, 24, 40],
+  },
+  HYPOTHESIS: {
+    label: 'Hypothesis-first',
+    expand: 'Hypothesis · Framework · Evidence · Recommendation',
+    useFor: ['ambiguity'],
+    steps: [
+      { name:'Hypothesis',    hint:'Your best guess at the cause.' },
+      { name:'Framework',     hint:'How you\'ll structure the investigation.' },
+      { name:'Evidence',      hint:'Data you\'d pull to confirm or reject.' },
+      { name:'Recommendation',hint:'What you\'d do next — be specific.' },
+    ],
+    beats: [0, 25, 55, 90],
   },
 };
+
+// Given a drill, return the best-matching framework
+function frameworkFor(drill) {
+  const id = drill?.id;
+  for (const fw of Object.values(FRAMEWORKS)) {
+    if (fw.useFor.includes(id)) return fw;
+  }
+  return FRAMEWORKS.STAR;
+}
+
+function findDrill(id) { return DRILLS.find(d => d.id === id); }
 
 const VoiceEngine = {
   recognition: null, speaking: false,
@@ -738,6 +794,7 @@ const VoiceEngine = {
     this.init();
     if (!this.recognition) { onStatus?.('Speech recognition not supported. Try Chrome or Edge.'); return; }
     let final = '';
+    this.recognition.continuous = false;
     this.recognition.onresult = (e) => {
       let interim = '';
       for (let i = e.resultIndex; i < e.results.length; i++) {
@@ -750,72 +807,216 @@ const VoiceEngine = {
     try { this.recognition.start(); onStatus?.('🔴 Listening… tap mic again to stop'); }
     catch(e) { onStatus?.('Allow microphone access and try again.'); }
   },
+  // Streaming variant used by the teleprompter — fires on every interim
+  // result so the live caption can update in real time. Stays listening
+  // until stopStream() is called. Auto-restarts on end() so long answers
+  // that pause mid-sentence don't kill the recognition.
+  streamListen(onUpdate) {
+    this.init();
+    if (!this.recognition) return null;
+    let full = '';
+    let shouldRestart = true;
+    this.recognition.continuous = true;
+    this.recognition.interimResults = true;
+    this.recognition.onresult = (e) => {
+      let interim = '';
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        if (e.results[i].isFinal) full += e.results[i][0].transcript + ' ';
+        else interim += e.results[i][0].transcript;
+      }
+      onUpdate?.({ final: full.trim(), interim: interim.trim(), combined: (full + interim).trim() });
+    };
+    this.recognition.onend = () => {
+      // Browsers sometimes auto-end after a pause — restart unless caller stopped us
+      if (shouldRestart) { try { this.recognition.start(); } catch (_) {} }
+    };
+    this.recognition.onerror = () => { /* swallow — onend will restart */ };
+    try { this.recognition.start(); } catch (_) {}
+    return {
+      stop: () => {
+        shouldRestart = false;
+        try { this.recognition?.stop(); } catch (_) {}
+        return full.trim();
+      },
+    };
+  },
   stop() { try { this.recognition?.stop(); } catch(e) {} },
 };
 
-function generateVoiceFeedback(mode, answer) {
-  const a = (answer || '').toLowerCase();
-  const words = a.split(/\s+/).filter(Boolean).length;
-  const strong = [], tips = [];
-  if (words < 15) tips.push('Your answer was brief — aim for 60–90 seconds with a clear situation, action, and result.');
-  if (words > 250) tips.push('Good detail, but tighten it to the 2–3 most important beats and end with the outcome.');
-  if (mode === 'interview') {
-    if (/(result|outcome|impact|led to|grew|saved|reduced|\d+%|\$\d)/i.test(answer)) strong.push('Nice — you mentioned a concrete outcome.');
-    else tips.push('Add a measurable result: dollars, %, time saved, or users impacted.');
-    if (/(situation|context|first|then|finally)/i.test(answer)) strong.push('Clear story structure — I could follow the arc.');
-    else tips.push('Use STAR: set up the Situation, your Task, the Action you took, and the Result.');
-    if (!/\bI\b/.test(answer)) tips.push("Use 'I' more than 'we' — the interviewer needs to see your individual contribution.");
-  } else {
-    if (/(range|band|market|before I|what'?s budgeted)/i.test(answer)) strong.push('Good — you deflected before naming a number.');
-    else if (/\$?\d{3}|\bk\b/.test(answer)) tips.push("You anchored first — try flipping it: 'What range has been budgeted for this role?'");
-    if (/(bonus|equity|signing|pto|vacation|start date|remote)/i.test(answer)) strong.push('Great — you expanded beyond base salary.');
-    else tips.push('Remember to negotiate the full package: signing bonus, equity, PTO, start date.');
-    if (/\bokay\b|\bsure\b|\bi guess\b/i.test(answer) && !/however|but|actually/i.test(answer)) tips.push("Watch for soft-acceptance language ('okay', 'sure'). You may be conceding implicitly.");
-  }
-  return [strong.map(s => '✅ ' + s).join('<br>'), tips.map(t => '🎯 ' + t).join('<br>')].filter(Boolean).join('<br><br>') || '✅ Solid answer. Try to be even more specific next time.';
+// ── Voice Coach state + timer engine ────────────────────────────────
+// state.voice = { phase, drillId, takeNo, seconds, transcript, streamHandle, analysis }
+//   phase: 'pick' | 'ready' | 'countdown' | 'live' | 'analyzing' | 'review'
+function voiceState() {
+  return (state.voice ||= { phase:'pick', drillId:null, takeNo:1, seconds:0, transcript:'', review:null });
 }
 
-function voiceStart() {
-  const mode = state.voiceMode || 'interview';
-  state.voiceSession = { started: true, idx: 0, transcripts: [], feedback: [] };
+let _voiceTimerId = null;
+let _voiceStream = null;
+
+// Kicks the countdown → live transition. Uses setInterval for the ticking
+// clock + per-second DOM updates to avoid full re-renders (which would
+// interrupt the live transcript animation and focus).
+function voiceBeginTake() {
+  const v = voiceState();
+  v.phase = 'countdown';
+  v.seconds = 3;
+  v.transcript = '';
   render();
-  setTimeout(() => {
-    VoiceEngine.speak(VOICE_SCRIPTS[mode].intro, () => {
-      VoiceEngine.speak(VOICE_SCRIPTS[mode].questions[0].q);
+
+  // Countdown 3 → 2 → 1 → GO, then flip to live
+  const countdownEl = () => document.getElementById('voice-countdown');
+  const countdownTick = () => {
+    if (v.seconds <= 0) {
+      clearInterval(_voiceTimerId);
+      v.phase = 'live';
+      v.seconds = 0;
+      render();
+      startLiveTimer();
+      startLiveTranscript();
+      return;
+    }
+    const el = countdownEl();
+    if (el) el.textContent = v.seconds;
+    v.seconds -= 1;
+  };
+  countdownTick();
+  _voiceTimerId = setInterval(countdownTick, 700);
+}
+
+function startLiveTimer() {
+  const v = voiceState();
+  v.seconds = 0;
+  if (_voiceTimerId) clearInterval(_voiceTimerId);
+  _voiceTimerId = setInterval(() => {
+    v.seconds += 1;
+    updateVoiceLiveDOM();
+  }, 1000);
+}
+
+function startLiveTranscript() {
+  const v = voiceState();
+  _voiceStream = VoiceEngine.streamListen((update) => {
+    v.transcript = update.combined || '';
+    const el = document.getElementById('voice-transcript');
+    if (el) {
+      // Distinguish final from interim with subtle opacity
+      const esc = (s) => s.replace(/</g,'&lt;');
+      el.innerHTML = esc(update.final) + (update.interim
+        ? ` <span style="opacity:.55">${esc(update.interim)}</span>`
+        : '') + (v.phase === 'live' ? '<span style="opacity:.5">▎</span>' : '');
+      el.scrollTop = el.scrollHeight;
+    }
+  });
+}
+
+// Called on every second-tick while live. Updates timer + STAR active step
+// + coach cue directly without re-rendering the whole card (which would
+// break the streaming SpeechRecognition attached to the DOM state).
+function updateVoiceLiveDOM() {
+  const v = voiceState();
+  const s = v.seconds;
+  const mm = String(Math.floor(s / 60)).padStart(2,'0');
+  const ss = String(s % 60).padStart(2,'0');
+  const t = document.getElementById('voice-timer');
+  if (t) t.textContent = `${mm}:${ss}`;
+
+  const drill = findDrill(v.drillId);
+  const fw = frameworkFor(drill);
+  fw.steps.forEach((step, i) => {
+    const beat = fw.beats[i];
+    const nextBeat = fw.beats[i+1] ?? 9999;
+    const active = s >= beat && s < nextBeat;
+    const done   = s >= nextBeat;
+    const row = document.querySelector(`[data-fw-step="${i}"]`);
+    if (!row) return;
+    row.dataset.state = done ? 'done' : active ? 'active' : 'pending';
+  });
+}
+
+async function voiceEndTake() {
+  const v = voiceState();
+  if (_voiceTimerId) { clearInterval(_voiceTimerId); _voiceTimerId = null; }
+  const finalText = _voiceStream ? _voiceStream.stop() : v.transcript;
+  _voiceStream = null;
+  v.transcript = finalText || v.transcript || '';
+  const elapsed = v.seconds;
+  v.phase = 'analyzing';
+  render();
+
+  const drill = findDrill(v.drillId) || { id:'?', title:'?' };
+  try {
+    const resp = await scriptCall({
+      action: 'analyze_interview_answer',
+      email: viewedEmail(),
+      drill,
+      transcript: v.transcript,
+      seconds: elapsed,
     });
-  }, 300);
-}
-function voiceNext() {
-  const mode = state.voiceMode || 'interview';
-  const script = VOICE_SCRIPTS[mode];
-  const s = state.voiceSession;
-  if (!s) return;
-  if (s.idx >= script.questions.length - 1) {
-    s.idx = script.questions.length; render();
-    VoiceEngine.speak('That wraps our session. Review the transcript and coaching notes below. Keep practicing — preparation turns nerves into confidence. Great work!');
-    return;
+    if (resp.configured && resp.review) {
+      v.review = resp.review;
+    } else {
+      v.review = mockInterviewReview(drill, v.transcript, elapsed);
+      if (!resp.configured) showToast('Using sample review — set ANTHROPIC_API_KEY for real Claude feedback', 'red');
+    }
+  } catch (e) {
+    console.error(e);
+    v.review = mockInterviewReview(drill, v.transcript, elapsed);
+    showToast('Analysis failed, showing sample — ' + (e.message || ''), 'red');
   }
-  s.idx++; render();
-  setTimeout(() => VoiceEngine.speak(script.questions[s.idx].q), 150);
+  v.phase = 'review';
+  render();
 }
-function voiceMicToggle() {
-  if (VoiceEngine.speaking) window.speechSynthesis?.cancel();
-  const btn = document.getElementById('micBtn');
-  const statusEl = document.getElementById('micStatus');
-  if (btn?.dataset.listening === '1') { VoiceEngine.stop(); btn.dataset.listening = '0'; return; }
-  if (btn) { btn.dataset.listening = '1'; btn.classList.add('ring-4','ring-red-300'); }
-  VoiceEngine.listen((final) => {
-    if (btn) { btn.dataset.listening = '0'; btn.classList.remove('ring-4','ring-red-300'); }
-    const mode = state.voiceMode || 'interview';
-    const s = state.voiceSession;
-    if (!s || !final) { statusEl && (statusEl.textContent = 'Didn\'t catch that — try again.'); return; }
-    const q = VOICE_SCRIPTS[mode].questions[s.idx].q;
-    const fb = generateVoiceFeedback(mode, final);
-    s.transcripts.push({ question: q, answer: final });
-    s.feedback.push(fb);
-    render();
-    VoiceEngine.speak(fb.replace(/<[^>]+>/g,' ').replace(/[✅🎯]/g,'').trim().slice(0,220), voiceNext);
-  }, (msg) => { statusEl && (statusEl.textContent = msg); });
+
+// Simple mock review for when Claude isn't available. Good enough to drive
+// the UI; real output is dramatically better when the key is in place.
+function mockInterviewReview(drill, transcript, seconds) {
+  const t = (transcript || '').trim();
+  const words = t.split(/\s+/).filter(Boolean).length;
+  const fillerCount = (t.match(/\b(um|uh|like|you know|so,? |basically|literally)\b/gi) || []).length;
+  const sentences = t.split(/[.!?]+\s/).filter(s => s.trim().length > 4);
+  const flags = sentences.slice(0, 5).map(s => {
+    const lower = s.toLowerCase();
+    if (/\d+\s*%|\d{3,}|\$|reduced|saved|grew|increased/.test(lower)) return { text: s.trim(), flag: 'metric', note: 'Concrete number — strong anchor.' };
+    if (/(um|uh|you know|basically|literally|like,)/.test(lower)) return { text: s.trim(), flag: 'filler', note: 'Filler language — cut it.' };
+    if (/\bwe\b/.test(lower) && !/\bi\b/.test(lower)) return { text: s.trim(), flag: 'weak', note: 'Says "we" without "I" — your contribution disappears.' };
+    if (/(i led|i decided|i ran|i proposed|i built)/i.test(s)) return { text: s.trim(), flag: 'specific', note: 'Clear ownership — good.' };
+    return { text: s.trim(), flag: 'neutral', note: '' };
+  });
+  let score = 60 + Math.min(25, words / 8) - fillerCount * 2;
+  if (flags.some(f => f.flag === 'metric')) score += 6;
+  score = Math.max(35, Math.min(95, Math.round(score)));
+  return {
+    score,
+    verdict: words < 20
+      ? 'Too brief — I need to hear the situation, your action, and the number that changed.'
+      : fillerCount > 4
+      ? `Strong bones, but ${fillerCount} fillers pulled me out of the story. Tighten the opening.`
+      : 'Solid structure. Sharpen the close with one specific outcome and you\'re there.',
+    xp: Math.max(40, Math.round(score * 1.4)),
+    stats: {
+      words, durationSec: seconds, wpm: seconds > 0 ? Math.round(words / (seconds/60)) : 0, fillerCount,
+    },
+    lines: flags,
+    nextDrills: ['Run the same prompt again, land the final number first.', 'Try the "Biggest failure" drill for variety.', 'Do a 30-second pace drill to match your speaking tempo to target.'],
+  };
+}
+
+function voiceRetake() {
+  const v = voiceState();
+  v.takeNo = (v.takeNo || 1) + 1;
+  v.phase = 'ready';
+  v.seconds = 0;
+  v.transcript = '';
+  v.review = null;
+  render();
+}
+
+function voiceBackToDrills() {
+  if (_voiceTimerId) { clearInterval(_voiceTimerId); _voiceTimerId = null; }
+  if (_voiceStream) { try { _voiceStream.stop(); } catch(_) {} _voiceStream = null; }
+  window.speechSynthesis?.cancel();
+  state.voice = { phase:'pick', drillId:null, takeNo:1, seconds:0, transcript:'', review:null };
+  render();
 }
 
 // ── ⑩ RENDER  ─────────────────────────────────────────────────────────
@@ -1836,80 +2037,253 @@ function renderPrep(c) {
   </div>`;
 }
 
-// ── VOICE COACH  ───────────────────────────────────────────────────────
+// ── VOICE COACH — teleprompter redesign (Parlor-inspired) ─────────────
 function renderVoice() {
-  const mode = state.voiceMode || 'interview';
-  const script = VOICE_SCRIPTS[mode];
-  const session = state.voiceSession || { started:false,idx:0,transcripts:[],feedback:[] };
+  const v = voiceState();
   const supported = ('speechSynthesis' in window) && (('webkitSpeechRecognition' in window)||('SpeechRecognition' in window));
+  if (!supported) {
+    return `<div class="card p-6 max-w-2xl mx-auto">
+      <div class="p-4 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-900">
+        ⚠️ Open this page in <b>Chrome</b> or <b>Edge</b> for voice features, and allow microphone access when prompted.
+      </div></div>`;
+  }
+  if (v.phase === 'pick' || !v.drillId) return renderVoiceDrillPicker();
+  if (v.phase === 'analyzing') return renderVoiceAnalyzing();
+  if (v.phase === 'review') return renderVoiceReview();
+  return renderVoiceTeleprompter();
+}
+
+function renderVoiceDrillPicker() {
+  const cats = {};
+  DRILLS.forEach(d => { (cats[d.category] ||= []).push(d); });
   return `
-  <div class="grid md:grid-cols-3 gap-6">
-    <div class="md:col-span-2 space-y-6">
-      <div class="card p-6">
-        <div class="flex flex-wrap items-center justify-between gap-3 mb-5">
-          <div><h2 class="text-xl font-bold font-headline">🎙️ Voice Coach</h2><p class="text-sm text-gray-500">Speak your answers aloud and get real-time coaching.</p></div>
-          <div class="inline-flex bg-gray-100 rounded-xl p-1">
-            <button data-action="voice-mode" data-mode="interview" class="nav-btn ${mode==='interview'?'active':''}">Interview</button>
-            <button data-action="voice-mode" data-mode="negotiation" class="nav-btn ${mode==='negotiation'?'active':''}">Negotiation</button>
-          </div>
-        </div>
-        ${!supported?`<div class="p-4 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-900 mb-4">⚠️ Open in <b>Chrome</b> or <b>Edge</b> for voice features. Allow mic access when prompted.</div>`:''}
-        <div class="rounded-2xl bg-gradient-to-br from-[#eef2ff] via-[#ffffff] to-[#ecece0] border border-[#e5e7eb] p-6">
-          <div class="flex items-start gap-4">
-            <div class="w-14 h-14 brand-grad rounded-full flex items-center justify-center text-2xl shrink-0 shadow" id="coachAvatar">🎙️</div>
-            <div class="flex-1 min-w-0">
-              <div class="text-xs uppercase tracking-wide text-[#4f46e5] font-semibold">Careers by Design · ${script.title}</div>
-              <div id="coachSpeech" class="mt-1 text-gray-900 leading-relaxed text-sm">${session.started?(script.questions[session.idx]?.q||'Session complete — great work!'):(script.intro)}</div>
-            </div>
-          </div>
-          <div class="mt-6 flex flex-col items-center gap-3">
-            ${!session.started?`
-              <button data-action="voice-start" class="btn btn-primary px-8 py-3 text-base">▶️ Start session</button>
-              <p class="text-xs text-gray-500">${script.questions.length} questions · ~${script.questions.length*2} min</p>` : `
-              <button id="micBtn" data-action="voice-mic" class="w-20 h-20 rounded-full brand-grad text-white flex items-center justify-center text-4xl shadow-lg hover:scale-105 transition">🎤</button>
-              <div id="micStatus" class="text-sm text-gray-500">Tap the mic and answer aloud</div>
-              <div class="flex gap-2 mt-1">
-                <button data-action="voice-replay" class="btn btn-secondary text-sm">🔁 Repeat</button>
-                <button data-action="voice-skip" class="btn btn-secondary text-sm">⏭️ Skip</button>
-                <button data-action="voice-end" class="btn btn-secondary text-sm">⏹️ End</button>
-              </div>`}
-          </div>
-          ${session.started?`<div class="mt-5"><div class="flex justify-between text-xs text-gray-500 mb-1"><span>Question ${Math.min(session.idx+1,script.questions.length)} of ${script.questions.length}</span><span>${Math.round(session.idx/script.questions.length*100)}%</span></div><div class="progress-bar"><div class="progress-fill" style="width:${session.idx/script.questions.length*100}%"></div></div></div>`:''}
-        </div>
+  <div class="max-w-4xl mx-auto">
+    <div class="flex items-end justify-between flex-wrap gap-3 mb-6">
+      <div>
+        <h2 class="text-2xl font-bold font-headline">🎙️ Voice Coach</h2>
+        <p class="text-sm text-gray-500">Pick a drill. Speak your answer aloud. Get instant Claude-powered feedback.</p>
       </div>
-      ${session.transcripts.length?`
-      <div class="card p-6">
-        <h3 class="font-bold mb-4">Session transcript & coaching</h3>
-        <div class="space-y-5">
-          ${session.transcripts.map((t,i)=>`<div><div class="text-xs font-semibold uppercase text-gray-500">Q${i+1}</div><div class="text-sm text-gray-800 mt-1">${t.question}</div><div class="text-xs font-semibold uppercase text-gray-500 mt-3">You said</div><div class="text-sm bg-gray-50 rounded-xl p-3 border border-gray-100 mt-1">"${t.answer}"</div><div class="text-xs font-semibold uppercase text-[#4f46e5] mt-3">💡 Coaching</div><div class="text-sm mt-1">${session.feedback[i]||''}</div></div>`).join('<hr class="border-gray-100"/>')}
-        </div>
-      </div>`:''}
-    </div>
-    <div class="space-y-5">
-      <div class="card p-6">
-        <h3 class="font-bold mb-3">${mode==='interview'?'Interview tips':'Negotiation tactics'}</h3>
-        <ul class="space-y-2 text-sm text-gray-700">
-          ${mode==='interview'?`
-            <li class="flex gap-2"><span class="text-[#06b6d4] shrink-0">•</span>Use <b>STAR</b>: Situation, Task, Action, Result.</li>
-            <li class="flex gap-2"><span class="text-[#06b6d4] shrink-0">•</span>Quantify outcomes — revenue, %, users, time.</li>
-            <li class="flex gap-2"><span class="text-[#06b6d4] shrink-0">•</span>Keep answers to 60–90 seconds.</li>
-            <li class="flex gap-2"><span class="text-[#06b6d4] shrink-0">•</span>End every story with what you learned.</li>
-            <li class="flex gap-2"><span class="text-[#06b6d4] shrink-0">•</span>Prepare 3 smart questions for the hiring manager.</li>
-          `:`
-            <li class="flex gap-2"><span class="text-[#06b6d4] shrink-0">•</span>Never name a number first — ask for their range.</li>
-            <li class="flex gap-2"><span class="text-[#06b6d4] shrink-0">•</span>After countering, <b>stay silent</b>.</li>
-            <li class="flex gap-2"><span class="text-[#06b6d4] shrink-0">•</span>Negotiate <b>total comp</b>: base, bonus, equity, PTO.</li>
-            <li class="flex gap-2"><span class="text-[#06b6d4] shrink-0">•</span>Cite market data: "Based on ranges I'm seeing…"</li>
-            <li class="flex gap-2"><span class="text-[#06b6d4] shrink-0">•</span>Get everything <b>in writing</b> before accepting verbally.</li>
-            <li class="flex gap-2"><span class="text-[#06b6d4] shrink-0">•</span>Know your BATNA — your walk-away alternative.</li>
-          `}
-        </ul>
-      </div>
-      <div class="card p-6 brand-grad text-white">
-        <h3 class="font-bold">Privacy note</h3>
-        <p class="text-sm opacity-90 mt-1">Your voice is processed entirely in your browser using the Web Speech API. Nothing is recorded or sent to a server.</p>
+      <div class="text-xs text-gray-500">
+        ${DRILLS.length} drills · Behavioral · Case · Executive presence · Negotiation
       </div>
     </div>
+    ${Object.entries(cats).map(([cat, drills]) => `
+      <div class="mb-6">
+        <div class="text-xs uppercase tracking-wide text-gray-500 font-semibold mb-2">${cat}</div>
+        <div class="grid sm:grid-cols-2 gap-3">
+          ${drills.map(d => `
+            <button data-action="voice-pick-drill" data-drill="${d.id}" class="card card-hover p-4 text-left cursor-pointer">
+              <div class="flex items-start justify-between gap-2">
+                <div class="font-headline font-bold text-gray-900 leading-snug text-sm">${d.title}</div>
+                <div class="flex items-center gap-1 shrink-0">
+                  ${'●'.repeat(d.difficulty)}${'○'.repeat(3 - d.difficulty)}
+                </div>
+              </div>
+              <div class="mt-2 flex flex-wrap gap-1.5 text-xs">
+                <span class="chip chip-gray">${d.duration}</span>
+                ${d.tags.map(t => `<span class="chip chip-blue">${t}</span>`).join('')}
+              </div>
+            </button>`).join('')}
+        </div>
+      </div>
+    `).join('')}
+  </div>`;
+}
+
+function renderVoiceTeleprompter() {
+  const v = voiceState();
+  const drill = findDrill(v.drillId);
+  const fw = frameworkFor(drill);
+  const phase = v.phase;
+  const mm = String(Math.floor(v.seconds / 60)).padStart(2,'0');
+  const ss = String(v.seconds % 60).padStart(2,'0');
+
+  return `
+  <div class="max-w-6xl mx-auto">
+    <!-- Top bar -->
+    <div class="flex items-center justify-between mb-5 gap-3 flex-wrap">
+      <div class="flex items-center gap-4">
+        <button data-action="voice-back" class="text-sm text-gray-500 hover:text-gray-900">← Exit</button>
+        <div class="text-xs uppercase tracking-wider text-gray-500 font-semibold">Session · Take ${v.takeNo || 1}</div>
+      </div>
+      <div class="flex items-center gap-3">
+        ${phase === 'live' ? `<span class="inline-flex items-center gap-1.5 text-xs text-red-600 font-semibold"><span class="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span>LIVE</span>` : ''}
+        <span id="voice-timer" class="font-mono text-sm text-gray-700" style="font-variant-numeric:tabular-nums;letter-spacing:.08em">${mm}:${ss}</span>
+      </div>
+    </div>
+
+    <div class="grid lg:grid-cols-3 gap-6">
+      <!-- Prompt + live transcript (takes 2 cols) -->
+      <div class="lg:col-span-2">
+        <!-- Dark teleprompter card -->
+        <div class="rounded-2xl p-8 relative" style="background:linear-gradient(160deg,#1e1b4b 0%,#312e81 50%,#3730a3 100%); min-height:360px;">
+          <div class="text-xs uppercase tracking-widest text-white/50 font-semibold mb-3">
+            ${drill.category}
+          </div>
+          <h1 class="font-headline text-white leading-tight" style="font-size:clamp(22px,3vw,34px)">${drill.title}</h1>
+
+          <div class="mt-6 pt-5 border-t border-white/10 text-sm text-white/80 leading-relaxed font-mono" id="voice-transcript" style="min-height:100px; max-height:220px; overflow-y:auto;">
+            ${phase === 'ready' ? '<span style="opacity:.5">▎ Press <b>Start take</b> — your words will stream here as you speak.</span>' : ''}
+            ${phase === 'countdown' ? `<div class="flex items-center justify-center w-full py-8"><div id="voice-countdown" class="font-headline text-white" style="font-size:88px;line-height:1;">${v.seconds || 'GO'}</div></div>` : ''}
+            ${phase === 'live' && !v.transcript ? '<span style="opacity:.5">▎ Listening…</span>' : ''}
+          </div>
+
+          <!-- HUD: take number, target duration -->
+          <div class="absolute top-5 right-6 flex items-center gap-3 text-xs text-white/60 font-mono">
+            <span>Target ${drill.duration}</span>
+          </div>
+        </div>
+
+        <!-- Controls -->
+        <div class="flex items-center gap-3 mt-5">
+          ${phase === 'ready' ? `
+            <button data-action="voice-begin-take" class="btn btn-primary inline-flex items-center gap-2 px-6">
+              🎤 Start take
+            </button>
+            <button data-action="voice-speak-prompt" class="btn btn-secondary text-sm">🔊 Hear the prompt</button>
+          ` : ''}
+          ${phase === 'countdown' ? `
+            <button data-action="voice-end-take" class="btn btn-secondary text-sm">Cancel</button>
+          ` : ''}
+          ${phase === 'live' ? `
+            <button data-action="voice-end-take" class="btn btn-primary inline-flex items-center gap-2 px-6" style="background:#dc2626">
+              ⏹ End take
+            </button>
+          ` : ''}
+          <button data-action="voice-back" class="btn btn-ghost text-sm ml-auto">← All drills</button>
+        </div>
+
+        <div class="text-xs text-gray-500 mt-3">Tip: look straight ahead, not at the screen. Pause when you need to — it reads as confidence.</div>
+      </div>
+
+      <!-- Framework sidebar -->
+      <div>
+        <div class="text-xs uppercase tracking-widest text-gray-500 font-semibold mb-3">
+          Framework · ${fw.label}
+        </div>
+        <div class="card p-0 divide-y divide-gray-100">
+          ${fw.steps.map((step, i) => {
+            const beat = fw.beats[i];
+            const nextBeat = fw.beats[i+1] ?? 9999;
+            const active = v.seconds >= beat && v.seconds < nextBeat && phase === 'live';
+            const done   = v.seconds >= nextBeat && phase === 'live';
+            const stateKey = done ? 'done' : active ? 'active' : 'pending';
+            return `
+            <div data-fw-step="${i}" data-state="${stateKey}" class="flex gap-3 p-4">
+              <div class="shrink-0 w-6 h-6 rounded-full border-2 flex items-center justify-center text-xs font-bold transition"
+                style="border-color:${stateKey === 'done' ? '#10b981' : stateKey === 'active' ? '#4f46e5' : '#d1d5db'}; background:${stateKey === 'done' ? '#10b981' : stateKey === 'active' ? '#4f46e5' : 'transparent'}; color:${stateKey === 'pending' ? '#374151' : 'white'};">
+                ${stateKey === 'done' ? '✓' : i+1}
+              </div>
+              <div class="flex-1">
+                <div class="font-headline font-bold text-sm ${stateKey === 'pending' ? 'text-gray-600' : 'text-gray-900'}">${step.name}</div>
+                <div class="text-xs text-gray-500 mt-0.5">${step.hint}</div>
+              </div>
+            </div>`;
+          }).join('')}
+        </div>
+
+        <div class="mt-5 text-xs text-gray-500">
+          <span class="font-semibold text-gray-700">${fw.label}</span> — ${fw.expand}
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderVoiceAnalyzing() {
+  const v = voiceState();
+  const drill = findDrill(v.drillId);
+  return `
+  <div class="max-w-2xl mx-auto text-center py-16">
+    <div class="text-4xl mb-4">✨</div>
+    <h2 class="font-headline text-3xl font-bold mb-2">Listening back…</h2>
+    <p class="text-gray-500 mb-6">Claude is reviewing your take on <b>"${drill?.title || 'this drill'}"</b>. Usually takes 5-10 seconds.</p>
+    <div class="loading-dots"><span></span><span></span><span></span></div>
+  </div>`;
+}
+
+function renderVoiceReview() {
+  const v = voiceState();
+  const drill = findDrill(v.drillId);
+  const r = v.review || {};
+  const s = r.score || 0;
+  const stats = r.stats || {};
+  const lines = r.lines || [];
+  const flagColor = (f) => {
+    switch (f) {
+      case 'metric':
+      case 'specific':
+      case 'good':     return { dot:'#10b981', label:'STRONG' };
+      case 'filler':
+      case 'weak':     return { dot:'#ef4444', label: (f === 'filler' ? 'FILLER' : 'WEAK') };
+      case 'neutral':  return { dot:'#9ca3af', label:'NEUTRAL' };
+      default:         return { dot:'#9ca3af', label: (f || '').toUpperCase() };
+    }
+  };
+
+  return `
+  <div class="max-w-4xl mx-auto">
+    <div class="flex items-center justify-between mb-6">
+      <button data-action="voice-back" class="text-sm text-gray-500 hover:text-gray-900">← Back to drills</button>
+      <div class="flex gap-2">
+        <button data-action="voice-retake" class="btn btn-secondary text-sm">🔄 Retake</button>
+        <button data-action="voice-back" class="btn btn-primary text-sm">✨ Pick another drill</button>
+      </div>
+    </div>
+
+    <!-- Hero: score + verdict -->
+    <div class="grid md:grid-cols-5 gap-6 mb-8 items-end">
+      <div class="md:col-span-2">
+        <div class="text-xs uppercase tracking-widest text-gray-500 font-semibold mb-2">Rep score</div>
+        <div class="flex items-baseline gap-3">
+          <div class="font-headline font-bold tracking-tight" style="font-size:112px;line-height:1;">${s}</div>
+          <div class="text-lg text-gray-400">/ 100</div>
+        </div>
+        <div class="text-sm text-indigo-600 font-semibold mt-2">+${r.xp || 0} XP</div>
+        <div class="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500 mt-3">
+          <span><b>${stats.words ?? 0}</b> words</span>
+          <span><b>${Math.floor((stats.durationSec||0)/60)}:${String((stats.durationSec||0)%60).padStart(2,'0')}</b> length</span>
+          <span><b>${stats.wpm ?? 0}</b> wpm</span>
+          <span><b>${stats.fillerCount ?? 0}</b> fillers</span>
+        </div>
+      </div>
+      <div class="md:col-span-3 card p-5" style="border-left:4px solid #4f46e5;">
+        <div class="text-xs uppercase tracking-widest text-gray-500 font-semibold mb-2">Coach verdict</div>
+        <div class="font-headline text-xl leading-snug text-gray-900">"${r.verdict || '—'}"</div>
+      </div>
+    </div>
+
+    <!-- Line-by-line transcript -->
+    ${lines.length ? `
+      <div class="card p-6 mb-8">
+        <div class="text-xs uppercase tracking-widest text-gray-500 font-semibold mb-3">Line-by-line</div>
+        <div class="divide-y divide-gray-100">
+          ${lines.map(ln => {
+            const c = flagColor(ln.flag);
+            return `
+            <div class="py-4">
+              <div class="text-gray-900 leading-relaxed">"${(ln.text || '').replace(/</g,'&lt;')}"</div>
+              ${ln.note ? `
+                <div class="flex items-center gap-2 mt-2 text-xs">
+                  <span class="w-2 h-2 rounded-full shrink-0" style="background:${c.dot}"></span>
+                  <span class="font-mono uppercase tracking-wider font-semibold" style="color:${c.dot}">${c.label}</span>
+                  <span class="text-gray-600">— ${ln.note}</span>
+                </div>` : ''}
+            </div>`;
+          }).join('')}
+        </div>
+      </div>` : ''}
+
+    ${(r.nextDrills || []).length ? `
+      <div>
+        <div class="text-xs uppercase tracking-widest text-gray-500 font-semibold mb-3">What to drill next</div>
+        <div class="grid sm:grid-cols-3 gap-3">
+          ${r.nextDrills.slice(0,3).map(n => `
+            <div class="card p-4">
+              <div class="text-sm text-gray-900 leading-snug">${n}</div>
+            </div>`).join('')}
+        </div>
+      </div>` : ''}
   </div>`;
 }
 
@@ -2506,14 +2880,28 @@ async function handleAction(e) {
       c.dashboardNotes = notes;
       await saveClientProfile({ dashboardNotes: notes }); break; }
 
-    case 'voice-mode':
-      state.voiceSession = null;
-      setState({ voiceMode: el.dataset.mode }); break;
-    case 'voice-start': voiceStart(); break;
-    case 'voice-mic': voiceMicToggle(); break;
-    case 'voice-replay': { const q=VOICE_SCRIPTS[state.voiceMode||'interview'].questions[state.voiceSession?.idx]?.q; if(q) VoiceEngine.speak(q); break; }
-    case 'voice-skip': voiceNext(); break;
-    case 'voice-end': VoiceEngine.stop(); window.speechSynthesis?.cancel(); setState({ voiceSession:null }); break;
+    // Voice Coach (teleprompter redesign) ─────────────────────────────
+    case 'voice-pick-drill': {
+      const did = el.dataset.drill;
+      state.voice = { phase:'ready', drillId:did, takeNo:1, seconds:0, transcript:'', review:null };
+      render();
+      break; }
+    case 'voice-speak-prompt': {
+      const d = findDrill(voiceState().drillId);
+      if (d) VoiceEngine.speak(d.title);
+      break; }
+    case 'voice-begin-take':
+      voiceBeginTake();
+      break;
+    case 'voice-end-take':
+      await voiceEndTake();
+      break;
+    case 'voice-retake':
+      voiceRetake();
+      break;
+    case 'voice-back':
+      voiceBackToDrills();
+      break;
 
     case 'open-drawer': {
       const email = el.dataset.email;
