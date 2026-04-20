@@ -1691,6 +1691,79 @@ function renderSwipeCardBody(j, isTop) {
       </div>` : ''}`;
 }
 
+// Community insights (Reddit → Claude synthesis) rendered inside job details.
+// Shows a summary, green/red flags, themed takeaways with clickable source
+// threads, and confidence indicator. When citations reference a thread,
+// the theme pills link out to the actual Reddit post.
+function renderCommunityInsightsBlock(insights, job) {
+  if (!insights) return '';
+  const confDot = { high: '#10b981', medium: '#f59e0b', low: '#9ca3af' }[insights.confidence] || '#9ca3af';
+  const confLabel = { high: 'strong signal', medium: 'mixed signal', low: 'thin signal' }[insights.confidence] || '';
+  const cites = insights.citations || [];
+  const fetchedAgo = insights.fetchedAt ? ` · pulled ${new Date(insights.fetchedAt).toLocaleDateString()}` : '';
+
+  return `
+  <div class="mt-5">
+    <div class="flex items-center justify-between mb-2 flex-wrap gap-2">
+      <div class="flex items-center gap-2">
+        <span class="text-xs font-semibold uppercase tracking-wide text-gray-500">🗣 Community insights</span>
+        <span class="inline-flex items-center gap-1 text-[10px] text-gray-500 uppercase tracking-wider">
+          <span class="w-1.5 h-1.5 rounded-full" style="background:${confDot}"></span>${confLabel}${fetchedAgo}
+        </span>
+      </div>
+      <button data-action="refresh-culture-intel" data-job="${job.id}" class="btn btn-ghost text-xs">🔄 Refresh</button>
+    </div>
+
+    <div class="card p-4">
+      ${insights.summary ? `<p class="text-sm text-gray-800 leading-relaxed">${insights.summary}</p>` : ''}
+
+      ${(insights.greenFlags || []).length || (insights.redFlags || []).length ? `
+        <div class="grid sm:grid-cols-2 gap-3 mt-4">
+          ${(insights.greenFlags || []).length ? `
+            <div>
+              <div class="text-[10px] uppercase tracking-wider text-green-700 font-semibold mb-1">✓ Green flags</div>
+              <ul class="space-y-1">
+                ${insights.greenFlags.map(f => `<li class="text-xs text-gray-700 flex gap-1.5"><span class="text-green-600">●</span><span>${f}</span></li>`).join('')}
+              </ul>
+            </div>` : ''}
+          ${(insights.redFlags || []).length ? `
+            <div>
+              <div class="text-[10px] uppercase tracking-wider text-red-700 font-semibold mb-1">⚠ Red flags</div>
+              <ul class="space-y-1">
+                ${insights.redFlags.map(f => `<li class="text-xs text-gray-700 flex gap-1.5"><span class="text-red-600">●</span><span>${f}</span></li>`).join('')}
+              </ul>
+            </div>` : ''}
+        </div>` : ''}
+
+      ${(insights.themes || []).length ? `
+        <div class="mt-4 space-y-2">
+          <div class="text-[10px] uppercase tracking-wider text-gray-500 font-semibold">Themes</div>
+          ${insights.themes.map(t => {
+            const sources = (t.citations || []).map(idx => cites.find(c => c.idx === idx)).filter(Boolean);
+            return `
+            <div class="p-2.5 rounded-lg bg-gray-50 border border-gray-100">
+              <div class="text-sm font-semibold text-gray-900">${t.theme}</div>
+              <div class="text-xs text-gray-600 mt-0.5">${t.insight}</div>
+              ${sources.length ? `
+                <div class="mt-2 flex flex-wrap gap-1.5">
+                  ${sources.map(s => `<a href="${s.url}" target="_blank" rel="noopener" class="chip chip-gray text-[10px] hover:underline" title="${s.title.replace(/"/g,'&quot;')}">r/${s.subreddit} · ${s.score}↑</a>`).join('')}
+                </div>` : ''}
+            </div>`;
+          }).join('')}
+        </div>` : ''}
+
+      ${!insights.themes?.length && cites.length ? `
+        <div class="mt-4 space-y-1">
+          <div class="text-[10px] uppercase tracking-wider text-gray-500 font-semibold mb-1">Raw threads</div>
+          ${cites.slice(0, 8).map(c => `
+            <a href="${c.url}" target="_blank" rel="noopener" class="block text-xs text-gray-700 hover:text-indigo-700 hover:underline">
+              r/${c.subreddit} · ${c.score}↑ · ${c.title}
+            </a>`).join('')}
+        </div>` : ''}
+    </div>
+  </div>`;
+}
+
 // Rendered inside job cards AND swipe cards. AI-generated outreach strategy
 // from enrich_jobs — channel, hook, who to target, a ready-to-paste LinkedIn
 // search, plus a few practical tips. Keeps the user thinking about HOW to
@@ -2002,6 +2075,15 @@ function renderJobDetailsPanel(j) {
         ${j.extra.outreachStrategy.linkedInSearch ? `
           <a href="https://www.linkedin.com/search/results/people/?keywords=${encodeURIComponent(j.extra.outreachStrategy.linkedInSearch)}" target="_blank" rel="noopener" class="btn btn-secondary text-xs inline-flex items-center gap-2">🔎 Open this search on LinkedIn</a>` : ''}
       </div>` : ''}
+
+    ${j.extra?.communityInsights
+      ? renderCommunityInsightsBlock(j.extra.communityInsights, j)
+      : `<div class="mt-5">
+           <button data-action="fetch-culture-intel" data-job="${j.id}" class="btn btn-secondary text-sm inline-flex items-center gap-2">
+             🗣 Pull community insights
+           </button>
+           <span class="text-xs text-gray-500 ml-2">What people on Reddit say about working at ${j.company}</span>
+         </div>`}
   </div>`;
 }
 
@@ -2948,6 +3030,40 @@ async function handleAction(e) {
       };
       render();
       await saveJob(job);
+      break; }
+
+    case 'fetch-culture-intel':
+    case 'refresh-culture-intel': {
+      const jid = el.dataset.job;
+      const job = c.jobs.find(j => j.id === jid);
+      if (!job) break;
+      const company = job.company;
+      if (!company) { showToast('No company on file for this job', 'red'); break; }
+      const refresh = el.dataset.action === 'refresh-culture-intel';
+      const origLabel = el.innerHTML;
+      el.disabled = true; el.innerHTML = '<span class="spinner"></span> Scanning Reddit…';
+      try {
+        const resp = await scriptCall({
+          action: 'fetch_company_culture',
+          email: viewedEmail(),
+          company,
+          refresh,
+        });
+        if (resp.insights) {
+          job.extra = job.extra || {};
+          job.extra.communityInsights = resp.insights;
+          render();
+          await saveJob(job);
+          showToast(resp.cached ? 'Insights loaded (cached)' : '🗣 Insights pulled');
+        } else {
+          el.disabled = false; el.innerHTML = origLabel;
+          showToast('No insights returned', 'red');
+        }
+      } catch (e) {
+        console.error(e);
+        el.disabled = false; el.innerHTML = origLabel;
+        showToast('Fetch failed — ' + (e.message || 'see console'), 'red');
+      }
       break; }
 
     case 'edit-coach-company-notes': {
