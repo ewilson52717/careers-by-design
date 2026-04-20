@@ -350,13 +350,20 @@ function rowToClient(headers, row) {
   };
 }
 
-// Jobs sheet columns: client_email|id|title|company|location|salary|source|posted|match|status|notes|need_app|created_at
+// Jobs sheet columns: client_email|id|title|company|location|salary|source|posted|match|status|notes|need_app|created_at|url|extra
+// `extra` is a JSON blob holding description, company/culture data,
+// application drafts, and submission status. Stored as JSON so we can add
+// fields without migrating the sheet.
 function rowToJob(row) {
+  let extra = {};
+  try { extra = row[14] ? JSON.parse(row[14]) : {}; } catch { extra = {}; }
   return {
     clientEmail: row[0], id: row[1], title: row[2], company: row[3],
     location: row[4], salary: row[5], source: row[6], posted: row[7],
     match: parseInt(row[8] || '75', 10), status: row[9] || 'new',
     notes: row[10] || '', needApp: row[11] || null,
+    url: row[13] || '',
+    extra, // { description, website, company:{...}, application:{...}, submission:{...} }
   };
 }
 
@@ -569,26 +576,76 @@ function mockAnalyzeProfile(q) {
 }
 
 function mockJobSearch(q) {
-  const companies = ['Linear','Notation','Versa AI','Harbor Labs','Stream','Grove','Kindred','Parcel','Moss','Indigo'];
+  // Each entry: [name, website, industry, size, glassdoor, awards]
+  // The website is what powers the Clearbit logo (https://logo.clearbit.com/<website>).
+  const companies = [
+    ['Linear',     'linear.app',     'Productivity SaaS', '51-200',   4.6, ['Best Places to Work 2024']],
+    ['Notation',   'notation.so',    'Knowledge Management','201-500', 4.3, ['Top Workplaces 2024']],
+    ['Versa AI',   'versa.ai',       'AI / ML',           '11-50',    4.4, ['Y Combinator W23']],
+    ['Harbor Labs','harborlabs.com', 'Developer Tools',   '51-200',   4.2, []],
+    ['Stream',     'getstream.io',   'Real-time APIs',    '201-500',  4.5, ['Built In Best Places to Work']],
+    ['Grove',      'grove.co',       'Sustainable Goods', '201-500',  4.0, ['Certified B Corp']],
+    ['Kindred',    'kindred.co',     'Health & Wellness', '11-50',    4.1, []],
+    ['Parcel',     'parcel.io',      'Logistics',         '501-1000', 3.9, ['Inc. Best Workplaces 2023']],
+    ['Moss',       'getmoss.com',    'FinTech',           '201-500',  4.4, []],
+    ['Indigo',     'indigoag.com',   'AgTech',            '1001-5000',4.0, ['Time 100 Most Influential Companies']],
+  ];
   const sources = ['LinkedIn','Wellfound','Greenhouse','Company site'];
   const locs = [q.locationPref || 'Remote (US)', 'Remote', 'Hybrid (NYC)', 'Hybrid (SF)'];
   const n = 5 + Math.floor(Math.random() * 4);
+
   return Array.from({ length: n }, (_, i) => {
     const floor = q.salaryFloor || 100000;
     const lo = floor + Math.floor(Math.random() * 15000);
     const hi = lo + 25000 + Math.floor(Math.random() * 20000);
+    const [cname, website, industry, size, glassdoor, awards] = companies[(i * 3) % companies.length];
+    const title = i % 3 === 0 ? `Senior ${q.roleTarget}` : i % 3 === 1 ? `${q.roleTarget}, Growth` : `Lead, ${q.roleTarget}`;
+    const slug = title.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
     return {
       id: 'j_' + Date.now() + '_' + i,
-      title: i % 3 === 0 ? `Senior ${q.roleTarget}` : i % 3 === 1 ? `${q.roleTarget}, Growth` : `Lead, ${q.roleTarget}`,
-      company: companies[(i * 3) % companies.length],
+      title,
+      company: cname,
       location: locs[i % locs.length],
-      salary: `$${Math.round(lo/1000)}–${Math.round(hi/1000)}k`,
+      salary: `$${(lo).toLocaleString('en-US')}–$${(hi).toLocaleString('en-US')}`,
       source: sources[i % sources.length],
       posted: `${1 + Math.floor(Math.random() * 10)}d ago`,
       match: 70 + Math.floor(Math.random() * 28),
       status: 'new', notes: '', needApp: null, clientEmail: viewedEmail(),
+      url: `https://${website}/careers/${slug}`,
+      extra: {
+        description: mockJobDescription(title, cname),
+        website,
+        company: {
+          industry, size,
+          glassdoorRating: glassdoor,
+          awards,
+          coachNotes: '',
+        },
+        application: { generated: false },
+        submission: { submitted: false },
+      },
     };
   }).sort((a, b) => b.match - a.match);
+}
+
+function mockJobDescription(title, company) {
+  return `${company} is hiring a ${title} to join the team. You'll partner with engineering, design, and go-to-market on the company's most strategic bets — shipping product that customers love and the business depends on.\n\nWhat you'll do\n• Own a meaningful surface area of the product end-to-end\n• Translate fuzzy strategy into a clear roadmap and ship it\n• Deeply understand customers via research, data, and direct conversations\n• Partner across functions to unblock execution\n\nWhat we're looking for\n• 5+ years of experience in similar roles\n• Strong product instincts paired with rigorous analytical thinking\n• Experience leading without authority across complex stakeholder maps\n• Excellent written and verbal communication\n\nNice to have\n• Domain experience in this space\n• Background scaling 0→1 or 1→10 products`;
+}
+
+// Generates draft application materials. Currently placeholder text;
+// will be replaced by a real LLM call once the API key is wired up.
+function mockApplicationMaterials(job, client) {
+  const name = client?.name || 'Your Name';
+  const role = job.title;
+  const co   = job.company;
+  const summary = (client?.questionnaire?.resumeSummary || '').slice(0, 300) || 'Experienced operator with a track record of shipping product that moves business metrics.';
+  return {
+    resume: `${name}\n${role} candidate · ${client?.email || ''}\n\nProfessional summary\n${summary}\n\nWhy ${co}\n• Drawn to ${co}'s focus on ${(job.extra?.company?.industry || 'the space').toLowerCase()}\n• Strong fit with the ${role} mandate based on past work\n• Excited by the company's growth stage (${job.extra?.company?.size || 'mid-stage'})\n\n[…tailored resume bullets generated from your full resume go here once the LLM is wired up]`,
+    coverLetter: `Dear ${co} Hiring Team,\n\nI'm writing to apply for the ${role} role. ${summary.slice(0, 200)}\n\nWhat draws me to ${co} specifically: your work in ${(job.extra?.company?.industry || 'the space').toLowerCase()} aligns directly with the kind of impact I want to have next. I'd love to bring my background to the team.\n\nA few highlights from my recent work:\n• [Quantified outcome 1 — pulled from your resume]\n• [Quantified outcome 2 — pulled from your resume]\n• [Quantified outcome 3 — pulled from your resume]\n\nI'd welcome the chance to talk further.\n\nBest,\n${name}`,
+    outreach: `Hi — I just applied to the ${role} role at ${co} and wanted to introduce myself. Quick context: ${summary.slice(0, 150)}. Would love to connect if you have 15 minutes — happy to share more about why ${co} caught my eye. Thanks!`,
+    generatedAt: new Date().toISOString(),
+    generated: true,
+  };
 }
 
 function mockInterviewQuestions(c, jobTitle) {
@@ -1043,6 +1100,33 @@ function renderProfile(c) {
 }
 
 // ── JOBS  ──────────────────────────────────────────────────────────────
+// Per-job expansion state lives in memory on `state.jobUI[jobId]`. Losing it
+// on reload is fine — it's just UX state.
+function jobUI(id) { return (state.jobUI ||= {}) [id] ||= { details: false, apply: false }; }
+function toggleJobUI(id, key) { const s = jobUI(id); s[key] = !s[key]; render(); }
+
+// Clearbit's free logo endpoint. Falls back to a solid initial tile if the
+// lookup 404s (which happens often for small/newer companies).
+function companyLogo(job) {
+  const website = job.extra?.website;
+  const letter = (job.company || '?').charAt(0).toUpperCase();
+  if (!website) {
+    return `<div class="w-12 h-12 rounded-xl brand-grad text-white flex items-center justify-center font-bold font-headline text-xl shrink-0">${letter}</div>`;
+  }
+  return `<img src="https://logo.clearbit.com/${website}" alt="${job.company} logo"
+    class="w-12 h-12 rounded-xl object-contain bg-white border border-[#e9dfcc] shrink-0"
+    onerror="this.outerHTML='<div class=\\'w-12 h-12 rounded-xl brand-grad text-white flex items-center justify-center font-bold font-headline text-xl shrink-0\\'>${letter}</div>'" />`;
+}
+
+function renderStarRating(r) {
+  if (!r) return '';
+  const full = Math.round(r);
+  return `<span class="inline-flex items-center gap-1 text-sm" title="Glassdoor ${r.toFixed(1)}">
+    <span class="text-[#b45309]">${'★'.repeat(full)}${'☆'.repeat(5 - full)}</span>
+    <span class="text-gray-600">${r.toFixed(1)}</span>
+  </span>`;
+}
+
 function renderJobs(c) {
   if (!c.profile?.analyzed) return `<div class="card p-8 text-center"><p class="text-gray-600">Complete your intake first to unlock job search.</p></div>`;
   const jobs = c.jobs || [];
@@ -1055,33 +1139,154 @@ function renderJobs(c) {
     </div>
   </div>
   <div id="searchStatus"></div>
-  ${jobs.length === 0 ? `<div class="card p-10 text-center"><div class="text-5xl mb-3">🎯</div><p class="text-gray-500">No jobs yet. Click <b>Find jobs now</b> to pull fresh matches.</p></div>` : `
-  <div class="space-y-3">
-    ${jobs.map(j => `
-    <div class="card p-5 card-hover">
-      <div class="flex flex-wrap items-start justify-between gap-3">
-        <div class="flex-1 min-w-0">
-          <div class="flex flex-wrap items-center gap-2">
-            <h3 class="font-bold text-gray-900">${j.title}</h3>
-            ${matchChip(j.match)} ${statusChip(j.status)}
+  ${jobs.length === 0
+    ? `<div class="card p-10 text-center"><div class="text-5xl mb-3">🎯</div><p class="text-gray-500">No jobs yet. Click <b>Find jobs now</b> to pull fresh matches.</p></div>`
+    : `<div class="space-y-4">${jobs.map(j => renderJobCard(j, c)).join('')}</div>`
+  }`;
+}
+
+function renderJobCard(j, c) {
+  const ui = jobUI(j.id);
+  const submitted = j.extra?.submission?.submitted;
+  const generated = j.extra?.application?.generated;
+  return `
+  <div class="card p-5">
+    <div class="flex items-start gap-4">
+      ${companyLogo(j)}
+      <div class="flex-1 min-w-0">
+        <div class="flex flex-wrap items-start justify-between gap-2">
+          <div class="min-w-0">
+            <h3 class="font-bold font-headline text-gray-900 text-lg leading-snug">${j.title}</h3>
+            <div class="text-sm text-gray-600 mt-0.5">
+              <b>${j.company}</b> · ${j.location} · <span class="font-medium">${j.salary}</span>
+            </div>
+            <div class="flex flex-wrap items-center gap-3 mt-2 text-xs text-gray-500">
+              <span>via ${j.source} · ${j.posted}</span>
+              ${j.extra?.company?.glassdoorRating ? `<span class="text-gray-300">|</span>${renderStarRating(j.extra.company.glassdoorRating)}` : ''}
+              ${(j.extra?.company?.awards||[]).length ? `<span class="text-gray-300">|</span><span class="inline-flex items-center gap-1 text-[#7a3620]">🏆 ${j.extra.company.awards[0]}${j.extra.company.awards.length>1?` +${j.extra.company.awards.length-1}`:''}</span>` : ''}
+            </div>
           </div>
-          <div class="text-sm text-gray-600 mt-1">${j.company} · ${j.location} · ${j.salary}</div>
-          <div class="text-xs text-gray-400 mt-1">via ${j.source} · ${j.posted}</div>
-          ${j.notes ? `<div class="mt-2 text-sm bg-gray-50 rounded-lg p-2 border border-gray-100">📝 ${j.notes}</div>` : ''}
+          <div class="flex items-center gap-2 shrink-0">
+            ${matchChip(j.match)}${statusChip(j.status)}
+          </div>
         </div>
-        <div class="flex flex-col items-end gap-2 shrink-0">
-          <select data-action="job-status" data-job="${j.id}" class="text-xs border border-gray-300 rounded-lg px-2 py-1.5">
+
+        <div class="flex flex-wrap items-center gap-2 mt-4">
+          ${j.url ? `<a href="${j.url}" target="_blank" rel="noopener" class="btn btn-secondary text-xs inline-flex items-center gap-1">🔗 View posting</a>` : ''}
+          <button data-action="toggle-job-details" data-job="${j.id}" class="btn btn-secondary text-xs">
+            ${ui.details ? '▲ Hide details' : '▼ Details'}
+          </button>
+          <button data-action="toggle-job-apply" data-job="${j.id}" class="btn btn-primary text-xs">
+            ${submitted ? '✓ Submitted' : generated ? '📝 Review application' : '✨ Start application'}
+          </button>
+          <select data-action="job-status" data-job="${j.id}" class="text-xs border border-gray-300 rounded-lg px-2 py-1.5 ml-auto">
             ${['new','interested','applied','interviewing','offer','rejected'].map(s=>`<option value="${s}" ${j.status===s?'selected':''}>${s}</option>`).join('')}
           </select>
-          <div class="flex gap-1">
-            <button data-action="apply-ai" data-job="${j.id}" class="btn btn-ghost text-xs">✨ AI draft</button>
-            <button data-action="apply-coach" data-job="${j.id}" class="btn btn-ghost text-xs">👤 Alert coach</button>
-          </div>
-          <button data-action="edit-notes" data-job="${j.id}" data-notes="${encodeURIComponent(j.notes||'')}" class="text-xs text-gray-400 hover:text-[#7a3620]">edit notes</button>
         </div>
+
+        ${j.notes ? `<div class="mt-3 text-sm bg-[#f5ede0] rounded-lg p-2.5 border border-[#e9dfcc]">📝 ${j.notes}</div>` : ''}
+
+        ${ui.details ? renderJobDetailsPanel(j) : ''}
+        ${ui.apply   ? renderJobApplyPanel(j, c) : ''}
       </div>
-    </div>`).join('')}
-  </div>`}`;
+    </div>
+  </div>`;
+}
+
+function renderJobDetailsPanel(j) {
+  const co = j.extra?.company || {};
+  const desc = j.extra?.description || '';
+  return `
+  <div class="mt-5 border-t border-[#e9dfcc] pt-4 space-y-4">
+    <div>
+      <div class="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">Job description</div>
+      ${desc
+        ? `<div class="text-sm text-gray-700 whitespace-pre-line leading-relaxed">${desc}</div>`
+        : `<div class="text-sm text-gray-400 italic">No description on file. <button data-action="edit-job-desc" data-job="${j.id}" class="btn btn-ghost text-xs">Add one</button></div>`}
+      ${desc ? `<button data-action="edit-job-desc" data-job="${j.id}" class="btn btn-ghost text-xs mt-1">Edit description</button>` : ''}
+    </div>
+    <div>
+      <div class="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">Company & culture</div>
+      <div class="grid sm:grid-cols-2 gap-3 text-sm">
+        ${co.industry ? `<div><span class="text-gray-500">Industry:</span> ${co.industry}</div>` : ''}
+        ${co.size ? `<div><span class="text-gray-500">Size:</span> ${co.size}</div>` : ''}
+        ${co.glassdoorRating ? `<div><span class="text-gray-500">Glassdoor:</span> ${renderStarRating(co.glassdoorRating)}</div>` : ''}
+        ${j.extra?.website ? `<div><span class="text-gray-500">Website:</span> <a href="https://${j.extra.website}" target="_blank" rel="noopener" class="underline">${j.extra.website}</a></div>` : ''}
+      </div>
+      ${(co.awards||[]).length ? `
+        <div class="mt-2 flex flex-wrap gap-1.5">
+          ${co.awards.map(a=>`<span class="chip chip-amber">🏆 ${a}</span>`).join('')}
+        </div>` : ''}
+      ${co.coachNotes ? `<div class="mt-2 text-sm bg-[#f5ede0] rounded-lg p-2.5 border border-[#e9dfcc]"><b>Coach note:</b> ${co.coachNotes}</div>` : ''}
+      <div class="mt-3 flex flex-wrap gap-2">
+        <button data-action="edit-company-info" data-job="${j.id}" class="btn btn-secondary text-xs">Edit company info</button>
+        <button data-action="edit-coach-company-notes" data-job="${j.id}" class="btn btn-secondary text-xs">Edit coach notes</button>
+        <button data-action="edit-notes" data-job="${j.id}" data-notes="${encodeURIComponent(j.notes||'')}" class="btn btn-secondary text-xs">Edit job notes</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderJobApplyPanel(j, c) {
+  const app = j.extra?.application || {};
+  const submitted = j.extra?.submission?.submitted;
+  if (submitted) {
+    return `
+    <div class="mt-5 border-t border-[#e9dfcc] pt-4">
+      <div class="bg-[#eef3e8] border border-[#d5dfc4] rounded-xl p-4 text-sm">
+        <div class="font-semibold text-[#4a5c3e]">✓ Submitted on ${(j.extra.submission.submittedAt || '').slice(0,10) || 'the employer site'}</div>
+        <div class="text-gray-600 mt-1">Status moved to <b>Applied</b>. Track progress using the status dropdown above.</div>
+      </div>
+    </div>`;
+  }
+  if (!app.generated) {
+    return `
+    <div class="mt-5 border-t border-[#e9dfcc] pt-4">
+      <div class="bg-[#fffdf8] border border-dashed border-[#e9dfcc] rounded-xl p-5 text-center">
+        <div class="text-3xl mb-2">✨</div>
+        <h4 class="font-bold font-headline text-lg">Draft tailored application materials</h4>
+        <p class="text-sm text-gray-500 mt-1 max-w-md mx-auto">We'll generate a tailored resume, cover letter, and outreach message for <b>${j.title}</b> at <b>${j.company}</b>. Review, tweak, then submit on the employer site yourself.</p>
+        <button data-action="generate-materials" data-job="${j.id}" class="btn btn-primary mt-4">Generate drafts →</button>
+      </div>
+    </div>`;
+  }
+  return `
+  <div class="mt-5 border-t border-[#e9dfcc] pt-4 space-y-4">
+    <div class="flex items-center justify-between">
+      <div class="text-xs font-semibold uppercase tracking-wide text-gray-500">Draft application materials</div>
+      <button data-action="regenerate-materials" data-job="${j.id}" class="btn btn-ghost text-xs">🔄 Regenerate</button>
+    </div>
+
+    ${renderMaterialBlock('Tailored resume', 'resume', app.resume, j.id)}
+    ${renderMaterialBlock('Cover letter',    'coverLetter', app.coverLetter, j.id)}
+    ${renderMaterialBlock('Outreach message (recruiter DM)', 'outreach', app.outreach, j.id)}
+
+    <div class="bg-[#f5ede0] border border-[#e9dfcc] rounded-xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+      <div>
+        <div class="font-semibold text-[#2d1c10]">Ready to submit?</div>
+        <div class="text-xs text-gray-600">Review everything above, then submit on the employer site. When you're done, mark this job as submitted so we can track it.</div>
+      </div>
+      <div class="flex gap-2 shrink-0">
+        ${j.url ? `<a href="${j.url}" target="_blank" rel="noopener" class="btn btn-secondary text-sm">Open posting →</a>` : ''}
+        <button data-action="mark-submitted" data-job="${j.id}" class="btn btn-primary text-sm">✓ I submitted this</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderMaterialBlock(label, key, content, jobId) {
+  const safeContent = (content || '').replace(/</g, '&lt;');
+  return `
+  <div>
+    <div class="flex items-center justify-between mb-1">
+      <div class="text-sm font-semibold">${label}</div>
+      <div class="flex gap-1">
+        <button data-action="copy-material" data-job="${jobId}" data-field="${key}" class="btn btn-ghost text-xs">📋 Copy</button>
+        <button data-action="edit-material" data-job="${jobId}" data-field="${key}" class="btn btn-ghost text-xs">✎ Edit</button>
+      </div>
+    </div>
+    <div id="mat-${jobId}-${key}" class="text-sm bg-[#fffdf8] border border-[#e9dfcc] rounded-xl p-3 whitespace-pre-line max-h-60 overflow-y-auto">${safeContent || '<span class="text-gray-400 italic">(empty — click Edit to add)</span>'}</div>
+  </div>`;
 }
 
 // ── PREP  ──────────────────────────────────────────────────────────────
@@ -1500,25 +1705,109 @@ async function handleAction(e) {
       render();
       await saveJob(job); break; }
 
-    case 'apply-ai': {
+    case 'toggle-job-details': toggleJobUI(el.dataset.job, 'details'); break;
+    case 'toggle-job-apply':   toggleJobUI(el.dataset.job, 'apply');   break;
+
+    case 'generate-materials':
+    case 'regenerate-materials': {
       const jid = el.dataset.job;
-      const job = c.jobs.find(j=>j.id===jid);
+      const job = c.jobs.find(j => j.id === jid);
       if (!job) break;
-      job.needApp='self'; if(job.status==='new') job.status='interested';
+      el.disabled = true; el.innerHTML = '<span class="spinner"></span> Drafting…';
+      // TODO: swap this for a real LLM call (OpenAI/Anthropic) through the
+      // Apps Script proxy once the API key is wired up.
+      await new Promise(r => setTimeout(r, 900)); // mock "thinking" delay
+      job.extra = job.extra || {};
+      job.extra.application = mockApplicationMaterials(job, c);
+      jobUI(jid).apply = true; // keep panel open
       render();
       await saveJob(job);
-      showToast('✨ AI is drafting your resume, cover letter & outreach message.');
+      showToast('✨ Drafts ready — review, tweak, then submit');
       break; }
 
-    case 'apply-coach': {
+    case 'mark-submitted': {
       const jid = el.dataset.job;
-      const job = c.jobs.find(j=>j.id===jid);
+      const job = c.jobs.find(j => j.id === jid);
       if (!job) break;
-      job.needApp='coach'; if(job.status==='new') job.status='interested';
-      c.coachAlerts = (c.coachAlerts||0) + 1;
+      job.extra = job.extra || {};
+      job.extra.submission = { submitted: true, submittedAt: new Date().toISOString() };
+      job.status = 'applied';
       render();
       await saveJob(job);
-      showToast('👤 Your coach has been notified.'); break; }
+      showToast('✓ Marked as submitted');
+      break; }
+
+    case 'copy-material': {
+      const jid = el.dataset.job;
+      const field = el.dataset.field;
+      const job = c.jobs.find(j => j.id === jid);
+      const text = job?.extra?.application?.[field] || '';
+      try { await navigator.clipboard.writeText(text); showToast('Copied to clipboard ✓'); }
+      catch { showToast('Copy failed — select the text manually', 'red'); }
+      break; }
+
+    case 'edit-material': {
+      const jid = el.dataset.job;
+      const field = el.dataset.field;
+      const job = c.jobs.find(j => j.id === jid);
+      if (!job) break;
+      const current = job.extra?.application?.[field] || '';
+      const updated = prompt('Edit — your changes are saved when you hit OK:', current);
+      if (updated === null) break;
+      job.extra = job.extra || {};
+      job.extra.application = { ...(job.extra.application || {}), [field]: updated };
+      render();
+      await saveJob(job);
+      break; }
+
+    case 'edit-job-desc': {
+      const jid = el.dataset.job;
+      const job = c.jobs.find(j => j.id === jid);
+      if (!job) break;
+      const v = prompt('Job description:', job.extra?.description || '');
+      if (v === null) break;
+      job.extra = { ...(job.extra || {}), description: v };
+      render();
+      await saveJob(job);
+      break; }
+
+    case 'edit-company-info': {
+      const jid = el.dataset.job;
+      const job = c.jobs.find(j => j.id === jid);
+      if (!job) break;
+      const co = job.extra?.company || {};
+      const industry = prompt('Industry:', co.industry || ''); if (industry === null) break;
+      const size = prompt('Company size (e.g. 51-200):', co.size || ''); if (size === null) break;
+      const gs = prompt('Glassdoor rating (0-5):', co.glassdoorRating || ''); if (gs === null) break;
+      const awards = prompt('Awards / certs (comma-separated):', (co.awards || []).join(', '));
+      if (awards === null) break;
+      const website = prompt('Website domain (for logo, e.g. linear.app):', job.extra?.website || '');
+      if (website === null) break;
+      job.extra = {
+        ...(job.extra || {}),
+        website: website.trim(),
+        company: {
+          ...co,
+          industry: industry.trim(),
+          size: size.trim(),
+          glassdoorRating: parseFloat(gs) || 0,
+          awards: awards.split(',').map(s => s.trim()).filter(Boolean),
+        },
+      };
+      render();
+      await saveJob(job);
+      break; }
+
+    case 'edit-coach-company-notes': {
+      const jid = el.dataset.job;
+      const job = c.jobs.find(j => j.id === jid);
+      if (!job) break;
+      const v = prompt('Coach notes about this company (visible to the client):', job.extra?.company?.coachNotes || '');
+      if (v === null) break;
+      job.extra = { ...(job.extra || {}), company: { ...(job.extra?.company || {}), coachNotes: v } };
+      render();
+      await saveJob(job);
+      break; }
 
     case 'edit-notes': {
       const jid = el.dataset.job;
