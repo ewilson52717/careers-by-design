@@ -1678,7 +1678,18 @@ async function handleAction(e) {
       };
       if (!q.roleTarget) { showToast('Enter a target role first', 'red'); break; }
       el.disabled=true; el.innerHTML='<span class="spinner"></span> Saving & analyzing…';
-      const profile = mockAnalyzeProfile(q);
+      let profile;
+      try {
+        const resp = await scriptCall({ action: 'analyze_profile', email: viewedEmail(), questionnaire: q });
+        profile = resp.configured && resp.profile ? resp.profile : mockAnalyzeProfile(q);
+        if (!resp.configured) {
+          showToast('Using sample analysis — set ANTHROPIC_API_KEY for real output', 'red');
+        }
+      } catch (e) {
+        console.error(e);
+        profile = mockAnalyzeProfile(q);
+        showToast('Analysis failed — showing sample', 'red');
+      }
       await saveClientProfile({ questionnaire:q, profile, resume:{...(c.resume||{}),uploaded:!!q.resumeSummary} });
       setState({ tab:'profile' }); break; }
 
@@ -1686,13 +1697,28 @@ async function handleAction(e) {
       const btn = document.getElementById('searchBtn');
       const status = document.getElementById('searchStatus');
       if (btn) { btn.disabled=true; btn.innerHTML='<span class="spinner"></span> Scanning…'; }
-      if (status) status.innerHTML=`<div class="card p-4 mb-4 bg-[#f5ede0] border-[#e9dfcc]"><div class="flex items-center gap-3 text-[#2d1c10]"><span class="loading-dots"><span></span><span></span><span></span></span><span>Scanning LinkedIn, Wellfound, Greenhouse…</span></div></div>`;
-      setTimeout(async () => {
-        const fresh = mockJobSearch(c.questionnaire||{});
-        const existingIds = new Set((c.jobs||[]).map(j=>j.id));
-        const newJobs = fresh.filter(j=>!existingIds.has(j.id));
+      if (status) status.innerHTML=`<div class="card p-4 mb-4 bg-[#f5ede0] border-[#e9dfcc]"><div class="flex items-center gap-3 text-[#2d1c10]"><span class="loading-dots"><span></span><span></span><span></span></span><span>Pulling fresh listings…</span></div></div>`;
+      try {
+        const resp = await scriptCall({ action: 'search_jobs', email: viewedEmail(), questionnaire: c.questionnaire || {} });
+        let fresh;
+        if (resp.configured && Array.isArray(resp.jobs)) {
+          // Stamp clientEmail on real results so they save under the right row
+          fresh = resp.jobs.map(j => ({ ...j, clientEmail: viewedEmail() }));
+        } else {
+          fresh = mockJobSearch(c.questionnaire || {});
+          showToast('Using sample jobs — set RAPIDAPI_KEY for live results', 'red');
+        }
+        const existingIds = new Set((c.jobs || []).map(j => j.id));
+        const newJobs = fresh.filter(j => !existingIds.has(j.id));
         await addJobs(newJobs);
-      }, 1400); break; }
+      } catch (e) {
+        console.error(e);
+        showToast('Job search failed — ' + (e.message || 'see console'), 'red');
+      } finally {
+        if (btn) { btn.disabled = false; btn.innerHTML = '🔍 Find jobs now'; }
+        if (status) status.innerHTML = '';
+      }
+      break; }
 
     case 'toggle-alerts':
       await saveClientProfile({ dailyAlerts: !c.dailyAlerts }); break;
@@ -1713,13 +1739,24 @@ async function handleAction(e) {
       const jid = el.dataset.job;
       const job = c.jobs.find(j => j.id === jid);
       if (!job) break;
-      el.disabled = true; el.innerHTML = '<span class="spinner"></span> Drafting…';
-      // TODO: swap this for a real LLM call (OpenAI/Anthropic) through the
-      // Apps Script proxy once the API key is wired up.
-      await new Promise(r => setTimeout(r, 900)); // mock "thinking" delay
-      job.extra = job.extra || {};
-      job.extra.application = mockApplicationMaterials(job, c);
-      jobUI(jid).apply = true; // keep panel open
+      el.disabled = true; el.innerHTML = '<span class="spinner"></span> Drafting with Claude…';
+      try {
+        const resp = await scriptCall({ action: 'generate_materials', email: viewedEmail(), job });
+        if (resp.configured && resp.materials) {
+          job.extra = job.extra || {};
+          job.extra.application = resp.materials;
+        } else {
+          // API key not set yet — use the stub so the UX still works
+          job.extra = job.extra || {};
+          job.extra.application = mockApplicationMaterials(job, c);
+          showToast('Using draft stub — set ANTHROPIC_API_KEY in Script Properties for real output', 'red');
+        }
+      } catch (e) {
+        console.error(e);
+        showToast('Draft failed — ' + (e.message || 'see console'), 'red');
+        break;
+      }
+      jobUI(jid).apply = true;
       render();
       await saveJob(job);
       showToast('✨ Drafts ready — review, tweak, then submit');
