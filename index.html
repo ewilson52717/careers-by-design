@@ -1031,7 +1031,117 @@ function voiceRetake() {
   v.seconds = 0;
   v.transcript = '';
   v.review = null;
+  v.chat = null;
   render();
+}
+
+// ── Coach chat  ──────────────────────────────────────────────────────
+// Sits below the review screen. Kicks off with an LLM-generated opening
+// message that references the specific take. Conversation state lives only
+// in memory — refreshing the page collapses the chat back to the CTA.
+function chatState() {
+  const v = voiceState();
+  return (v.chat ||= { open: false, messages: [], sending: false });
+}
+
+async function coachChatOpen() {
+  const chat = chatState();
+  chat.open = true;
+  chat.messages = [];
+  chat.sending = true;
+  chat.exhausted = null;
+  render();
+  try {
+    const v = voiceState();
+    const drill = findDrill(v.drillId) || {};
+    const resp = await scriptCall({
+      action: 'coach_chat',
+      email: viewedEmail(),
+      drill,
+      transcript: v.transcript,
+      review: v.review,
+      history: [],
+      newMessage: '',
+    });
+    if (resp.configured && resp.reply) {
+      chat.messages.push({ role: 'coach', text: resp.reply, ts: Date.now() });
+      if (resp.limitReached) chat.exhausted = resp.limitReached;
+    } else {
+      chat.messages.push({
+        role: 'coach',
+        text: v.review?.verdict
+          ? `${v.review.verdict} Want to try it again with that one fix?`
+          : 'That was a solid first take. What do you want to work on?',
+        ts: Date.now(),
+      });
+    }
+  } catch (e) {
+    console.error(e);
+    chat.messages.push({ role: 'coach', text: 'Hmm, something glitched on my side. Try sending me a message and we\'ll pick up from there.', ts: Date.now() });
+  } finally {
+    chat.sending = false;
+    render();
+    scrollCoachChatToBottom();
+  }
+}
+
+async function coachChatSend() {
+  const chat = chatState();
+  if (chat.sending) return;
+  const input = document.getElementById('coach-chat-input');
+  const text = (input?.value || '').trim();
+  if (!text) return;
+  if (input) { input.value = ''; }
+  chat.messages.push({ role: 'user', text, ts: Date.now() });
+  chat.sending = true;
+  render();
+  scrollCoachChatToBottom();
+
+  try {
+    const v = voiceState();
+    const drill = findDrill(v.drillId) || {};
+    // Send the last N exchanges for context — keeps token use bounded
+    const historyWindow = chat.messages.slice(-14, -1); // exclude the message we just added (that's newMessage)
+    const resp = await scriptCall({
+      action: 'coach_chat',
+      email: viewedEmail(),
+      drill,
+      transcript: v.transcript,
+      review: v.review,
+      history: historyWindow,
+      newMessage: text,
+    });
+    if (resp.configured && resp.reply) {
+      chat.messages.push({ role: 'coach', text: resp.reply, ts: Date.now() });
+      if (resp.limitReached) chat.exhausted = resp.limitReached;
+    } else {
+      chat.messages.push({ role: 'coach', text: '(Sample reply — coach service not configured.)', ts: Date.now() });
+    }
+  } catch (e) {
+    console.error(e);
+    chat.messages.push({ role: 'coach', text: 'Connection hiccup. Say that again?', ts: Date.now() });
+  } finally {
+    chat.sending = false;
+    render();
+    scrollCoachChatToBottom();
+    if (!chat.exhausted) {
+      setTimeout(() => document.getElementById('coach-chat-input')?.focus(), 80);
+    }
+  }
+}
+
+function coachChatEnd() {
+  const v = voiceState();
+  v.chat = null;
+  render();
+}
+
+// Auto-scrolls the chat log to the latest message without re-rendering
+function scrollCoachChatToBottom() {
+  setTimeout(() => {
+    const el = document.getElementById('coach-chat-log');
+    if (el) el.scrollTop = el.scrollHeight;
+  }, 30);
 }
 
 function voiceBackToDrills() {
@@ -2589,7 +2699,96 @@ function renderVoiceReview() {
             </div>`).join('')}
         </div>
       </div>` : ''}
+
+    ${renderCoachChatPanel(v)}
   </div>`;
+}
+
+// Chat panel rendered inside the review screen. Starts collapsed with a CTA;
+// expands to a full message log + input once the user engages.
+function renderCoachChatPanel(v) {
+  const chat = v.chat;
+  if (!chat?.open) {
+    return `
+    <div class="mt-8 card p-5 bg-gradient-to-br from-indigo-50 via-white to-cyan-50 border-indigo-100">
+      <div class="flex items-start gap-4 flex-wrap">
+        <div class="flex-1 min-w-0">
+          <div class="text-xs uppercase tracking-widest text-indigo-600 font-semibold mb-1">Coaching, live</div>
+          <h3 class="font-headline font-bold text-lg">💬 Keep working on this with your coach</h3>
+          <p class="text-sm text-gray-600 mt-1 max-w-xl">Chat with your coach about this take — work on a specific weakness, try a different angle, or just think out loud together.</p>
+        </div>
+        <button data-action="coach-chat-open" class="btn btn-primary text-sm">Start chat →</button>
+      </div>
+    </div>`;
+  }
+
+  return `
+  <div class="mt-8 card p-0 overflow-hidden">
+    <!-- Chat header -->
+    <div class="px-5 py-3 border-b border-gray-100 flex items-center justify-between bg-gradient-to-r from-indigo-50 to-cyan-50">
+      <div class="flex items-center gap-2">
+        <div class="w-8 h-8 rounded-full brand-grad flex items-center justify-center text-white text-sm">💬</div>
+        <div>
+          <div class="text-sm font-semibold text-gray-900">Your coach</div>
+          <div class="text-xs text-gray-500">${chat.sending ? 'typing…' : 'online'}</div>
+        </div>
+      </div>
+      <button data-action="coach-chat-end" class="btn btn-ghost text-xs">End chat</button>
+    </div>
+
+    <!-- Message log -->
+    <div id="coach-chat-log" class="p-5 space-y-3 overflow-y-auto" style="max-height:420px; min-height:200px;">
+      ${chat.messages.length === 0 && chat.sending
+        ? `<div class="flex"><div class="inline-flex items-center gap-2 text-sm text-gray-500 italic"><span class="loading-dots"><span></span><span></span><span></span></span> coach is thinking…</div></div>`
+        : ''}
+      ${chat.messages.map(m => m.role === 'coach'
+        ? `<div class="flex gap-2 items-start max-w-[90%]">
+             <div class="w-8 h-8 rounded-full brand-grad flex items-center justify-center text-white text-xs shrink-0">💬</div>
+             <div class="bg-gray-100 rounded-2xl rounded-tl-sm px-3 py-2 text-sm text-gray-900 leading-relaxed">${escapeHtml(m.text)}</div>
+           </div>`
+        : `<div class="flex justify-end">
+             <div class="bg-indigo-600 text-white rounded-2xl rounded-tr-sm px-3 py-2 text-sm leading-relaxed max-w-[80%]">${escapeHtml(m.text)}</div>
+           </div>`
+      ).join('')}
+      ${chat.sending && chat.messages.length > 0 ? `
+        <div class="flex gap-2 items-start">
+          <div class="w-8 h-8 rounded-full brand-grad flex items-center justify-center text-white text-xs shrink-0">💬</div>
+          <div class="bg-gray-100 rounded-2xl rounded-tl-sm px-3 py-2 text-xs text-gray-500 italic">
+            <span class="loading-dots"><span></span><span></span><span></span></span>
+          </div>
+        </div>` : ''}
+    </div>
+
+    <!-- Input (replaced with a gentle end-state when a cap is hit) -->
+    ${chat.exhausted ? `
+      <div class="p-4 border-t border-gray-100 bg-gray-50 text-center">
+        <div class="text-xs uppercase tracking-wider text-gray-500 font-semibold mb-1">
+          ${chat.exhausted === 'daily' ? 'Daily limit reached' : 'Session complete'}
+        </div>
+        <div class="text-sm text-gray-700">${chat.exhausted === 'daily'
+          ? 'Chat is available again tomorrow. In the meantime, run the drill on your own.'
+          : 'Run the drill again with what we talked about — I\'ll be here for your next take.'}</div>
+      </div>` : `
+      <div class="p-3 border-t border-gray-100 bg-white flex gap-2">
+        <input id="coach-chat-input" type="text" autocomplete="off"
+          placeholder="${chat.sending ? 'Wait for the coach…' : 'Type your reply and hit enter…'}"
+          ${chat.sending ? 'disabled' : ''}
+          onkeydown="if(event.key==='Enter'){event.preventDefault();document.querySelector('[data-action=coach-chat-send]')?.click();}"
+          class="flex-1 border border-gray-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-indigo-500" />
+        <button data-action="coach-chat-send" class="btn btn-primary text-sm ${chat.sending ? 'opacity-40 pointer-events-none' : ''}">Send</button>
+      </div>`}
+  </div>`;
+}
+
+// Simple HTML-escape so user/coach text never breaks the layout if it
+// contains angle brackets or stray markdown.
+function escapeHtml(s) {
+  return String(s || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/\n/g, '<br>');
 }
 
 // ── DASHBOARD  ────────────────────────────────────────────────────────
@@ -3280,6 +3479,10 @@ async function handleAction(e) {
     case 'voice-back':
       voiceBackToDrills();
       break;
+
+    case 'coach-chat-open':  await coachChatOpen(); break;
+    case 'coach-chat-send':  await coachChatSend(); break;
+    case 'coach-chat-end':   coachChatEnd(); break;
 
     case 'open-drawer': {
       const email = el.dataset.email;
