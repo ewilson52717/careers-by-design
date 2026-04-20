@@ -115,6 +115,41 @@ const SETUP_COMPLETE = !CONFIG.CLIENT_ID.includes('YOUR_') &&
 // ── ② AUTH LAYER  ─────────────────────────────────────────────────────
 let tokenClient = null, accessToken = null, currentUser = null;
 
+// Persist session in localStorage so refreshes, new tabs, and short browser
+// restarts don't force a re-login. We honor the token's own expiry (Google
+// issues ~1-hour tokens); once expired the user signs in again.
+const SESSION_KEY = 'cbd.session.v1';
+
+function saveSession(tokenResp) {
+  try {
+    const expiresAt = Date.now() + ((tokenResp?.expires_in || 3500) * 1000);
+    localStorage.setItem(SESSION_KEY, JSON.stringify({
+      accessToken: tokenResp.access_token,
+      user: currentUser,
+      expiresAt,
+    }));
+  } catch (e) { /* storage may be disabled; fail silently */ }
+}
+
+function loadSession() {
+  try {
+    const raw = localStorage.getItem(SESSION_KEY);
+    if (!raw) return null;
+    const saved = JSON.parse(raw);
+    if (!saved?.accessToken || !saved.expiresAt || !saved.user?.email) return null;
+    // 30-second safety buffer so we don't hand the proxy a token about to expire mid-request
+    if (Date.now() >= saved.expiresAt - 30_000) {
+      localStorage.removeItem(SESSION_KEY);
+      return null;
+    }
+    return saved;
+  } catch { return null; }
+}
+
+function clearSession() {
+  try { localStorage.removeItem(SESSION_KEY); } catch {}
+}
+
 function initAuth() {
   if (!window.google?.accounts) { setTimeout(initAuth, 300); return; }
   tokenClient = google.accounts.oauth2.initTokenClient({
@@ -127,6 +162,7 @@ function initAuth() {
       if (resp.error) { showToast('Sign-in failed: ' + resp.error, 'red'); return; }
       accessToken = resp.access_token;
       await fetchUserInfo();
+      saveSession(resp);
       await loadAndBoot();
     },
   });
@@ -146,8 +182,20 @@ function signIn() {
 function signOut() {
   if (accessToken) google.accounts.oauth2.revoke(accessToken, () => {});
   accessToken = null; currentUser = null;
+  clearSession();
   state = { page: 'login' };
   render();
+}
+
+// Called when the proxy tells us the token is no longer valid. Clears the
+// stored session and kicks the user back to the login screen so they can
+// sign in fresh. Avoids spinning in a retry loop on a dead token.
+function handleExpiredSession() {
+  accessToken = null; currentUser = null;
+  clearSession();
+  state = { page: 'login' };
+  render();
+  showToast('Your session expired — please sign in again', 'red');
 }
 const isCoach = () => CONFIG.COACH_EMAILS.map(e=>e.toLowerCase()).includes(currentUser?.email?.toLowerCase());
 
@@ -168,6 +216,8 @@ const viewedEmail = () => viewAs && viewAs !== 'self' ? viewAs : currentUser?.em
 //   • the OAuth scope can stay small (userinfo only)
 
 // Low-level: fires one POST to the Apps Script Web App. Errors bubble up.
+// If the proxy reports the token is no longer valid, we clear the saved
+// session and bounce the user back to login.
 async function scriptCall(payload) {
   // Content-Type MUST be text/plain — application/json triggers a CORS
   // preflight that Apps Script Web Apps don't answer. Apps Script reads
@@ -184,7 +234,13 @@ async function scriptCall(payload) {
   let data;
   try { data = JSON.parse(text); }
   catch { throw new Error(`Non-JSON response (likely a Google login page). First 120 chars: ${text.slice(0,120)}`); }
-  if (!data.ok) throw new Error(data.error || 'Script error');
+  if (!data.ok) {
+    // Token has expired or been revoked — kick back to login cleanly
+    if (/unauthorized/i.test(data.error || '') || /invalid_token/i.test(data.error || '')) {
+      handleExpiredSession();
+    }
+    throw new Error(data.error || 'Script error');
+  }
   return data;
 }
 
@@ -316,6 +372,45 @@ function buildPrepSummary(rows) {
 function initials(name) {
   const parts = (name || '?').trim().split(/\s+/);
   return ((parts[0]?.[0] || '') + (parts[1]?.[0] || '')).toUpperCase() || '??';
+}
+
+// ── CURRENCY HELPERS  ──────────────────────────────────────────────────
+//  - formatCurrency(120000) → "$120,000"
+//  - parseCurrency("$120,000") → 120000
+//  Used by money inputs (salary floor, etc.) which display formatted
+//  but store raw integers under the hood.
+const _currencyFmt = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
+function formatCurrency(n) {
+  const num = Number(n);
+  if (!Number.isFinite(num) || num === 0) return '';
+  return _currencyFmt.format(num);
+}
+function parseCurrency(str) {
+  if (str == null) return null;
+  const cleaned = String(str).replace(/[^0-9.\-]/g, '');
+  if (!cleaned) return null;
+  const n = parseInt(cleaned, 10);
+  return Number.isFinite(n) ? n : null;
+}
+// Wires up an input element so it shows formatted currency on blur and
+// raw digits while the user is typing. Call after render() — it's a no-op
+// on missing elements so it's safe to call defensively.
+function bindCurrencyInput(id) {
+  const el = document.getElementById(id);
+  if (!el || el._currencyBound) return;
+  el._currencyBound = true;
+  const reformat = () => {
+    const n = parseCurrency(el.value);
+    el.value = n != null ? formatCurrency(n) : '';
+  };
+  const strip = () => {
+    const n = parseCurrency(el.value);
+    el.value = n != null ? String(n) : '';
+  };
+  el.addEventListener('focus', strip);
+  el.addEventListener('blur', reformat);
+  // initial format (in case the value was set via template)
+  if (el.value && document.activeElement !== el) reformat();
 }
 
 // ── RESUME FILE UPLOAD  ────────────────────────────────────────────────
@@ -562,10 +657,10 @@ const VoiceEngine = {
     if (!('speechSynthesis' in window)) { onend?.(); return; }
     window.speechSynthesis.cancel();
     const u = new SpeechSynthesisUtterance(text);
-    u.rate = 1.0;
-    const voices = window.speechSynthesis.getVoices();
-    const pref = voices.find(v => /Jenny|Aria|Samantha|Google US/i.test(v.name)) || voices.find(v => v.lang === 'en-US');
-    if (pref) u.voice = pref;
+    u.rate = 1.08;   // +8% — slightly brisker, feels more natural/conversational
+    u.pitch = 1.0;
+    u.volume = 1.0;
+    u.voice = pickBestVoice();
     u.onend = () => { this.speaking = false; onend?.(); };
     u.onerror = () => { this.speaking = false; onend?.(); };
     this.speaking = true;
@@ -659,6 +754,10 @@ function voiceMicToggle() {
 function render() {
   document.getElementById('app').innerHTML = buildPage();
   bindEvents();
+  // Wire up any currency-formatted inputs that just got rendered. Safe to
+  // call unconditionally — bindCurrencyInput no-ops when the element is
+  // absent or already bound.
+  bindCurrencyInput('q-salaryFloor');
 }
 
 function buildPage() {
@@ -830,7 +929,7 @@ function renderIntake(c) {
           <div><label class="text-sm font-medium text-gray-700">Location preference</label>
             <input id="q-locationPref" value="${q.locationPref||''}" class="mt-1 w-full border border-gray-300 rounded-xl p-2 text-sm" placeholder="Remote, NYC, Hybrid…" /></div>
           <div><label class="text-sm font-medium text-gray-700">Salary floor (USD)</label>
-            <input id="q-salaryFloor" type="number" value="${q.salaryFloor||''}" class="mt-1 w-full border border-gray-300 rounded-xl p-2 text-sm" placeholder="120000" /></div>
+            <input id="q-salaryFloor" type="text" inputmode="numeric" value="${q.salaryFloor ? formatCurrency(q.salaryFloor) : ''}" class="mt-1 w-full border border-gray-300 rounded-xl p-2 text-sm" placeholder="$120,000" /></div>
           <div class="md:col-span-2"><label class="text-sm font-medium text-gray-700">Top strengths (comma-separated)</label>
             <input id="q-strengths" value="${(q.strengths||[]).join(', ')}" class="mt-1 w-full border border-gray-300 rounded-xl p-2 text-sm" placeholder="storytelling, analytics, leadership" /></div>
           <div class="md:col-span-2"><label class="text-sm font-medium text-gray-700">Industries of interest</label>
@@ -865,11 +964,50 @@ function renderIntake(c) {
 }
 
 // ── PROFILE  ───────────────────────────────────────────────────────────
+// Splits "Jane Smith Doe" into { first: "Jane", last: "Smith Doe" } so
+// the client can control exactly how their name appears on applications.
+function splitDisplayName(full) {
+  const parts = (full || '').trim().split(/\s+/);
+  if (parts.length <= 1) return { first: parts[0] || '', last: '' };
+  return { first: parts[0], last: parts.slice(1).join(' ') };
+}
+
+function renderNameCard(c) {
+  const { first, last } = splitDisplayName(c.name);
+  return `
+    <div class="card p-6">
+      <div class="flex items-center justify-between mb-3">
+        <div><h3 class="text-lg font-bold font-headline">How you appear on applications</h3><p class="text-xs text-gray-500">This is the name that will be used in generated resumes and cover letters. Signed in as <b>${c.email}</b>.</p></div>
+      </div>
+      <div class="grid sm:grid-cols-2 gap-3">
+        <div><label class="text-sm font-medium text-gray-700">First name</label>
+          <input id="display-first-name" value="${first.replace(/"/g,'&quot;')}" class="mt-1 w-full border border-gray-300 rounded-xl p-2 text-sm" placeholder="Jane" /></div>
+        <div><label class="text-sm font-medium text-gray-700">Last name</label>
+          <input id="display-last-name" value="${last.replace(/"/g,'&quot;')}" class="mt-1 w-full border border-gray-300 rounded-xl p-2 text-sm" placeholder="Smith" /></div>
+      </div>
+      <button data-action="save-display-name" class="btn btn-primary mt-4 text-sm">Save name</button>
+    </div>`;
+}
+
 function renderProfile(c) {
-  if (!c.profile?.analyzed) return `<div class="card p-10 text-center"><div class="text-5xl mb-3">📋</div><h2 class="text-xl font-bold">No analysis yet</h2><p class="text-sm text-gray-500 mt-1">Complete your intake and save — your profile will be analyzed automatically.</p><button data-action="set-tab" data-tab="intake" class="btn btn-primary mt-4">Go to intake</button></div>`;
+  const nameCard = renderNameCard(c);
+  if (!c.profile?.analyzed) {
+    return `
+    <div class="space-y-6">
+      ${nameCard}
+      <div class="card p-10 text-center">
+        <div class="text-5xl mb-3">📋</div>
+        <h2 class="text-xl font-bold font-headline">No analysis yet</h2>
+        <p class="text-sm text-gray-500 mt-1">Complete your intake and save — your profile will be analyzed automatically.</p>
+        <button data-action="set-tab" data-tab="intake" class="btn btn-primary mt-4">Go to intake</button>
+      </div>
+    </div>`;
+  }
   const p = c.profile;
   return `
-  <div class="grid md:grid-cols-3 gap-6">
+  <div class="space-y-6">
+    ${nameCard}
+    <div class="grid md:grid-cols-3 gap-6">
     <div class="md:col-span-2 space-y-6">
       <div class="card p-6">
         <div class="flex items-center justify-between mb-5">
@@ -899,6 +1037,7 @@ function renderProfile(c) {
           <button data-action="set-tab" data-tab="voice" class="btn btn-secondary w-full text-left">🎙️ Voice coach</button>
         </div>
       </div>
+    </div>
     </div>
   </div>`;
 }
@@ -1298,6 +1437,16 @@ async function handleAction(e) {
     case 'set-tab': setState({ tab: el.dataset.tab }); break;
     case 'refresh': await loadAndBoot(); break;
 
+    case 'save-display-name': {
+      const first = document.getElementById('display-first-name')?.value?.trim() || '';
+      const last  = document.getElementById('display-last-name')?.value?.trim() || '';
+      if (!first) { showToast('First name is required', 'red'); break; }
+      const fullName = (first + ' ' + last).trim();
+      state.client.name = fullName;
+      el.disabled = true; el.innerHTML = '<span class="spinner"></span> Saving…';
+      await saveClientProfile({ name: fullName });
+      break; }
+
     case 'save-resume': {
       const summary = document.getElementById('resume-summary')?.value?.trim();
       const fileName = document.getElementById('resume-filename')?.value?.trim();
@@ -1314,7 +1463,7 @@ async function handleAction(e) {
         workStyle: document.getElementById('q-workStyle')?.value,
         roleTarget: document.getElementById('q-roleTarget')?.value?.trim(),
         locationPref: document.getElementById('q-locationPref')?.value?.trim(),
-        salaryFloor: parseInt(document.getElementById('q-salaryFloor')?.value||'0',10)||null,
+        salaryFloor: parseCurrency(document.getElementById('q-salaryFloor')?.value),
         strengths: document.getElementById('q-strengths')?.value?.split(',').map(s=>s.trim()).filter(Boolean),
         industries: document.getElementById('q-industries')?.value?.split(',').map(s=>s.trim()).filter(Boolean),
         energizers: document.getElementById('q-energizers')?.value?.trim(),
@@ -1440,8 +1589,51 @@ if ('speechSynthesis' in window) {
   window.speechSynthesis.getVoices();
   window.speechSynthesis.onvoiceschanged = () => window.speechSynthesis.getVoices();
 }
-if (SETUP_COMPLETE) initAuth();
-render();
+
+// Picks the best-sounding English voice the browser offers, ranked by our
+// subjective quality preferences. Edge (Azure neural) > Chrome's Google
+// Neural2 > macOS premium voices > anything en-US. Returns null if nothing
+// matches — the browser will then use its platform default, which is fine.
+function pickBestVoice() {
+  if (!('speechSynthesis' in window)) return null;
+  const voices = window.speechSynthesis.getVoices();
+  if (!voices?.length) return null;
+  const ranked = [
+    // Edge / Azure neural — very natural, multiple voices
+    v => /Microsoft.*(Aria|Jenny|Emma|Guy|Davis|Jason|Sara|Tony).*Online.*Neural/i.test(v.name),
+    v => /Microsoft.*(Aria|Jenny|Emma|Sara).*Neural/i.test(v.name),
+    // Chrome Google US neural
+    v => /Google US English/i.test(v.name) && /en-US/i.test(v.lang),
+    v => /en-US-Neural2/i.test(v.voiceURI || v.name),
+    // macOS premium ("enhanced") voices
+    v => /(Samantha|Alex|Ava|Karen|Serena).*Premium/i.test(v.name),
+    v => /Samantha|Alex|Ava|Karen|Serena/i.test(v.name),
+    // Any Google or enhanced English voice
+    v => /Google/i.test(v.name) && /en/i.test(v.lang),
+    v => /en-US/i.test(v.lang),
+    v => /en/i.test(v.lang),
+  ];
+  for (const test of ranked) {
+    const hit = voices.find(test);
+    if (hit) return hit;
+  }
+  return voices[0] || null;
+}
+if (SETUP_COMPLETE) {
+  initAuth();
+  // If we have a still-valid saved session, jump straight back into the app
+  // instead of showing the login screen on every refresh.
+  const saved = loadSession();
+  if (saved) {
+    accessToken  = saved.accessToken;
+    currentUser  = saved.user;
+    loadAndBoot();   // shows the loading screen, then routes to client/coach view
+  } else {
+    render();
+  }
+} else {
+  render();
+}
 </script>
 </body>
 </html>
