@@ -1634,11 +1634,15 @@ function renderSwipeDeck() {
 
 function renderSwipeCardBody(j, isTop) {
   const co = j.extra?.company || {};
-  const desc = (j.extra?.description || '').slice(0, 400);
+  const fitSummary = j.extra?.fitSummary;
+  const cultureHi  = j.extra?.cultureHighlights || [];
+  const outreach   = j.extra?.outreachStrategy;
+  const desc = (j.extra?.description || '').slice(0, 260);
   return `
     <div class="swipe-stamp like">♥ Like</div>
     <div class="swipe-stamp nope">✗ Nope</div>
     <div class="p-6 flex-1 overflow-y-auto">
+      <!-- Header: logo + title + match -->
       <div class="flex items-start gap-3 mb-3">
         ${companyLogo(j).replace('w-12 h-12', 'w-14 h-14')}
         <div class="flex-1 min-w-0">
@@ -1648,26 +1652,66 @@ function renderSwipeCardBody(j, isTop) {
         ${j.match ? matchChip(j.match) : ''}
       </div>
 
-      <div class="flex flex-wrap gap-3 text-sm text-gray-700 mb-4">
+      <div class="flex flex-wrap gap-3 text-sm text-gray-700 mb-3">
         <span>📍 ${j.location}</span>
         <span>💰 ${j.salary || '—'}</span>
+        ${co.glassdoorRating ? `<span>${renderStarRating(co.glassdoorRating)}</span>` : ''}
       </div>
 
-      ${co.glassdoorRating ? `<div class="mb-3">${renderStarRating(co.glassdoorRating)}</div>` : ''}
+      ${fitSummary ? `
+        <div class="rounded-xl p-3 mb-3 bg-[#eef2ff] border border-[#c7d2fe]">
+          <div class="text-[10px] uppercase tracking-wider text-indigo-700 font-semibold mb-0.5">✨ Why it fits</div>
+          <div class="text-sm text-[#1e1b4b] leading-snug">${fitSummary}</div>
+        </div>` : ''}
+
+      ${cultureHi.length ? `
+        <div class="mb-3">
+          <div class="text-[10px] uppercase tracking-wider text-gray-500 font-semibold mb-1">Culture & environment</div>
+          <div class="flex flex-wrap gap-1.5">
+            ${cultureHi.map(h => `<span class="chip chip-gray text-xs">${h}</span>`).join('')}
+          </div>
+        </div>` : ''}
+
       ${(co.awards || []).length ? `
         <div class="flex flex-wrap gap-1.5 mb-3">
           ${co.awards.slice(0,3).map(a=>`<span class="chip chip-amber text-xs">🏆 ${a}</span>`).join('')}
         </div>` : ''}
 
+      ${outreach ? renderOutreachBlock(outreach, j) : ''}
+
       ${desc ? `
-        <div class="text-xs uppercase tracking-wide text-gray-500 font-semibold mt-4 mb-1">About the role</div>
-        <div class="text-sm text-gray-700 whitespace-pre-line leading-relaxed">${desc}${(j.extra?.description||'').length > 400 ? '…' : ''}</div>
+        <div class="text-[10px] uppercase tracking-wider text-gray-500 font-semibold mt-3 mb-1">About the role</div>
+        <div class="text-xs text-gray-600 whitespace-pre-line leading-relaxed">${desc}${(j.extra?.description||'').length > 260 ? '…' : ''}</div>
       ` : ''}
     </div>
     ${j.url && isTop ? `
-      <div class="p-3 border-t border-gray-100 bg-gray-50">
-        <a href="${j.url}" target="_blank" rel="noopener" class="text-xs text-indigo-600 hover:underline">🔗 View full posting →</a>
+      <div class="p-3 border-t border-gray-100 bg-gray-50 flex gap-4">
+        <a href="${j.url}" target="_blank" rel="noopener" class="text-xs text-indigo-600 hover:underline font-semibold">🔗 View full posting →</a>
+        ${outreach?.linkedInSearch ? `<a href="https://www.linkedin.com/search/results/people/?keywords=${encodeURIComponent(outreach.linkedInSearch)}" target="_blank" rel="noopener" class="text-xs text-indigo-600 hover:underline">🔎 Find a warm contact</a>` : ''}
       </div>` : ''}`;
+}
+
+// Rendered inside job cards AND swipe cards. AI-generated outreach strategy
+// from enrich_jobs — channel, hook, who to target, a ready-to-paste LinkedIn
+// search, plus a few practical tips. Keeps the user thinking about HOW to
+// get in, not just whether to apply.
+function renderOutreachBlock(outreach, job) {
+  if (!outreach) return '';
+  const channelEmoji = {
+    'LinkedIn':'🔎', 'Company site':'🌐', 'Email':'✉️',
+    'Referral':'🤝', 'Cold apply':'📬',
+  }[outreach.channel] || '💡';
+  return `
+    <div class="rounded-xl p-3 mb-3 bg-[#fef3c7] border border-[#fcd34d]">
+      <div class="text-[10px] uppercase tracking-wider text-amber-800 font-semibold mb-1">${channelEmoji} How to get in</div>
+      ${outreach.angle ? `<div class="text-sm text-amber-900 leading-snug mb-2"><b>Lead with:</b> ${outreach.angle}</div>` : ''}
+      ${outreach.targetTitle ? `<div class="text-xs text-amber-900 mb-1"><b>Who to find:</b> ${outreach.targetTitle}</div>` : ''}
+      ${outreach.channel ? `<div class="text-xs text-amber-900 mb-1"><b>Best channel:</b> ${outreach.channel}</div>` : ''}
+      ${(outreach.tips || []).length ? `
+        <ul class="mt-2 space-y-1 text-xs text-amber-900 leading-snug">
+          ${outreach.tips.map(t => `<li class="flex gap-1.5"><span>•</span><span>${t}</span></li>`).join('')}
+        </ul>` : ''}
+    </div>`;
 }
 
 // Called after render() when the swipe deck is active, to attach gesture
@@ -1684,6 +1728,9 @@ function wireSwipeGestures() {
   const nopeStamp = topCard.querySelector('.swipe-stamp.nope');
 
   topCard.addEventListener('pointerdown', (e) => {
+    // Let clicks on links/buttons pass through normally — otherwise the
+    // "View posting" anchor can never fire because we capture the pointer.
+    if (e.target.closest('a, button, input, select, textarea')) return;
     dragging = true; startX = e.clientX; startY = e.clientY; pointerId = e.pointerId;
     topCard.setPointerCapture(e.pointerId);
     topCard.classList.remove('rest'); topCard.classList.add('drag');
@@ -1767,6 +1814,29 @@ if (typeof window !== 'undefined') window.addEventListener('keydown', onSwipeKey
 function jobSignature(j) {
   if (j?.url) return ('u:' + j.url).trim().toLowerCase();
   return ('t:' + (j?.title || '') + '|' + (j?.company || '') + '|' + (j?.location || '')).trim().toLowerCase();
+}
+
+// Cheap keyword-overlap baseline so cards never say 0% when the LLM is
+// unavailable or hasn't enriched yet. Gets replaced by the LLM-scored value
+// as soon as enrich_jobs returns.
+function keywordMatchScore(job, questionnaire) {
+  const q = questionnaire || {};
+  const haystack = ((job.title || '') + ' ' + (job.company || '') + ' ' + (job.extra?.description || '') + ' ' + (job.extra?.company?.industry || '')).toLowerCase();
+  let score = 55; // floor — JSearch already prefiltered to the client's role query
+  const needles = [
+    q.roleTarget,
+    ...(q.strengths || []),
+    ...(q.industries || []),
+  ].filter(Boolean).flatMap(s => String(s).toLowerCase().split(/\s+/).filter(w => w.length > 3));
+  const hits = new Set();
+  needles.forEach(w => { if (haystack.includes(w)) hits.add(w); });
+  // Each unique hit nudges the score up to a sensible ceiling for keyword matching
+  score += Math.min(32, hits.size * 4);
+  // Location preference alignment
+  if (q.locationPref && job.location && job.location.toLowerCase().includes(String(q.locationPref).toLowerCase().split(/[,\s]/)[0])) {
+    score += 4;
+  }
+  return Math.max(40, Math.min(92, score));
 }
 
 // Clearbit's free logo endpoint. Falls back to a solid initial tile if the
@@ -1873,6 +1943,17 @@ function renderJobCard(j, c) {
           <button data-action="delete-job" data-job="${j.id}" data-title="${(j.title||'').replace(/"/g,'&quot;')}" class="text-xs text-gray-400 hover:text-red-600 px-2 py-1.5" title="Delete this job">🗑</button>
         </div>
 
+        ${j.extra?.fitSummary ? `
+          <div class="mt-3 rounded-lg p-2.5 bg-[#eef2ff] border border-[#c7d2fe]">
+            <div class="text-[10px] uppercase tracking-wider text-indigo-700 font-semibold mb-0.5">✨ Why it fits</div>
+            <div class="text-sm text-[#1e1b4b] leading-snug">${j.extra.fitSummary}</div>
+          </div>` : ''}
+
+        ${(j.extra?.cultureHighlights || []).length ? `
+          <div class="mt-2 flex flex-wrap gap-1.5">
+            ${j.extra.cultureHighlights.map(h => `<span class="chip chip-gray text-xs">${h}</span>`).join('')}
+          </div>` : ''}
+
         ${j.notes ? `<div class="mt-3 text-sm bg-[#eef2ff] rounded-lg p-2.5 border border-[#e5e7eb]">📝 ${j.notes}</div>` : ''}
 
         ${ui.details ? renderJobDetailsPanel(j) : ''}
@@ -1913,6 +1994,14 @@ function renderJobDetailsPanel(j) {
         <button data-action="edit-notes" data-job="${j.id}" data-notes="${encodeURIComponent(j.notes||'')}" class="btn btn-secondary text-xs">Edit job notes</button>
       </div>
     </div>
+
+    ${j.extra?.outreachStrategy ? `
+      <div>
+        <div class="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">Outreach strategy</div>
+        ${renderOutreachBlock(j.extra.outreachStrategy, j)}
+        ${j.extra.outreachStrategy.linkedInSearch ? `
+          <a href="https://www.linkedin.com/search/results/people/?keywords=${encodeURIComponent(j.extra.outreachStrategy.linkedInSearch)}" target="_blank" rel="noopener" class="btn btn-secondary text-xs inline-flex items-center gap-2">🔎 Open this search on LinkedIn</a>` : ''}
+      </div>` : ''}
   </div>`;
 }
 
@@ -2611,8 +2700,11 @@ async function handleAction(e) {
     case 'search-jobs': {
       const btn = document.getElementById('searchBtn');
       const status = document.getElementById('searchStatus');
+      const setStatus = (msg) => {
+        if (status) status.innerHTML = `<div class="card p-4 mb-4 bg-[#eef2ff] border-[#e5e7eb]"><div class="flex items-center gap-3 text-[#1e1b4b]"><span class="loading-dots"><span></span><span></span><span></span></span><span>${msg}</span></div></div>`;
+      };
       if (btn) { btn.disabled=true; btn.innerHTML='<span class="spinner"></span> Scanning…'; }
-      if (status) status.innerHTML=`<div class="card p-4 mb-4 bg-[#eef2ff] border-[#e5e7eb]"><div class="flex items-center gap-3 text-[#1e1b4b]"><span class="loading-dots"><span></span><span></span><span></span></span><span>Pulling fresh listings…</span></div></div>`;
+      setStatus('Pulling fresh listings…');
       try {
         const resp = await scriptCall({ action: 'search_jobs', email: viewedEmail(), questionnaire: c.questionnaire || {} });
         let fresh;
@@ -2622,17 +2714,40 @@ async function handleAction(e) {
           fresh = mockJobSearch(c.questionnaire || {});
           showToast('Using sample jobs — set RAPIDAPI_KEY for live results', 'red');
         }
-        // Stable dedup signature. Each search gets fresh random IDs, so we
-        // can't use job.id — use the URL (unique per posting) or a
-        // normalized title+company+location hash as a fallback.
+        // Dedup against existing
         const existingSigs = new Set((c.jobs || []).map(jobSignature));
         const newJobs = fresh.filter(j => !existingSigs.has(jobSignature(j)));
         const skipped = fresh.length - newJobs.length;
         if (newJobs.length === 0) {
           showToast(skipped > 0 ? `No new jobs — all ${skipped} were already in your list` : 'No jobs found');
         } else {
-          // Open the swipe deck instead of auto-adding. The deck finalizes and
-          // saves only the right-swiped jobs when it closes.
+          // Keyword-baseline match score so the cards never say "0%"
+          newJobs.forEach(j => { j.match = j.match || keywordMatchScore(j, c.questionnaire || {}); });
+
+          // Batch-enrich via Claude: per-job fit summary, culture, outreach
+          setStatus('Claude is analyzing fit, culture, and outreach strategy…');
+          try {
+            const enr = await scriptCall({
+              action: 'enrich_jobs',
+              email: viewedEmail(),
+              jobs: newJobs,
+              questionnaire: c.questionnaire || {},
+            });
+            if (enr.configured && Array.isArray(enr.enriched)) {
+              enr.enriched.forEach((e, i) => {
+                const j = newJobs[i]; if (!j) return;
+                j.match = e.match || j.match;
+                j.extra = j.extra || {};
+                j.extra.fitSummary = e.fitSummary;
+                j.extra.cultureHighlights = e.cultureHighlights;
+                j.extra.outreachStrategy = e.outreachStrategy;
+              });
+            }
+          } catch (enrichErr) {
+            console.warn('[enrich_jobs skipped]', enrichErr);
+            // Non-fatal — we keep keyword-score matches and continue
+          }
+
           openSwipeDeck(newJobs);
           if (skipped > 0) {
             showToast(`${newJobs.length} new to review · ${skipped} duplicate${skipped>1?'s':''} skipped`);
