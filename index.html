@@ -161,6 +161,21 @@ function clearSession() {
   try { localStorage.removeItem(SESSION_KEY); } catch {}
 }
 
+// ── UI preferences (last-active tab, etc.) ────────────────────────────
+// Separate from session so it persists across sign-outs and key rotations.
+const UI_PREFS_KEY = 'cbd.ui.v1';
+function loadUIPrefs() {
+  try { return JSON.parse(localStorage.getItem(UI_PREFS_KEY) || '{}') || {}; }
+  catch { return {}; }
+}
+function saveUIPrefs(patch) {
+  try {
+    const cur = loadUIPrefs();
+    const next = { ...cur, ...patch };
+    localStorage.setItem(UI_PREFS_KEY, JSON.stringify(next));
+  } catch (_) {}
+}
+
 function initAuth() {
   if (!window.google?.accounts) { setTimeout(initAuth, 300); return; }
   tokenClient = google.accounts.oauth2.initTokenClient({
@@ -309,11 +324,19 @@ function hydrateClient(resp) {
   return client;
 }
 
+// Valid tabs a client session can land on. Used to sanity-check the saved
+// UI pref before restoring (a stale value shouldn't leave the app broken).
+const CLIENT_TABS = ['intake','profile','jobs','prep','voice','dashboard'];
+function lastClientTab() {
+  const prefs = loadUIPrefs();
+  return CLIENT_TABS.includes(prefs.tab) ? prefs.tab : 'intake';
+}
+
 async function loadMyProfile() {
   const resp = await scriptGet({ action: 'get_my_data' });
   const client = hydrateClient(resp);
   if (!client) { state = { page: 'register' }; return; }
-  state = { page: 'client', client, tab: 'intake' };
+  state = { page: 'client', client, tab: lastClientTab() };
 }
 
 // Coach previews exactly what a chosen client sees. If the target row doesn't
@@ -323,7 +346,7 @@ async function loadClientByEmail(email) {
   const resp = await scriptGet({ action: 'get_client_data', email });
   const client = hydrateClient(resp);
   if (!client) { state = { page: 'register' }; return; }
-  state = { page: 'client', client, tab: 'intake' };
+  state = { page: 'client', client, tab: lastClientTab() };
 }
 
 async function loadAllClients() {
@@ -1034,8 +1057,8 @@ function buildPage() {
   switch (state.page) {
     case 'login':    return renderLogin();
     case 'register': return renderRegister();
-    case 'client':   return renderHeader() + `<main class="max-w-6xl mx-auto px-4 py-8">${renderClientTabs()}</main>` + renderFooter() + renderSwipeDeck() + renderJobDetailsModal();
-    case 'coach':    return renderHeader() + `<main class="max-w-7xl mx-auto px-4 py-8">${renderCoach()}</main>` + renderFooter() + renderSwipeDeck() + renderJobDetailsModal();
+    case 'client':   return renderHeader() + `<main class="max-w-6xl mx-auto px-4 py-8">${renderClientTabs()}</main>` + renderFooter() + renderSwipeDeck() + renderJobDetailsModal() + renderInsightsModal();
+    case 'coach':    return renderHeader() + `<main class="max-w-7xl mx-auto px-4 py-8">${renderCoach()}</main>` + renderFooter() + renderSwipeDeck() + renderJobDetailsModal() + renderInsightsModal();
     case 'loading':  return renderLoadingScreen(state.loadingMsg);
     case 'error':    return `<div class="min-h-screen flex items-center justify-center p-8"><div class="card p-8 max-w-md text-center"><div class="text-4xl mb-3">⚠️</div><h2 class="font-bold text-gray-900">Something went wrong</h2><p class="text-sm text-gray-600 mt-2">${state.errorMsg || 'Unknown error'}</p><button onclick="location.reload()" class="btn btn-primary mt-4">Reload</button></div></div>`;
     default: return renderLogin();
@@ -1700,7 +1723,9 @@ function renderCommunityInsightsBlock(insights, job) {
   const confLabel = { high: 'strong signal', medium: 'mixed signal', low: 'thin signal' }[insights.confidence] || '';
   const cites = insights.citations || [];
   const fetchedAgo = insights.fetchedAt ? ` · updated ${new Date(insights.fetchedAt).toLocaleDateString()}` : '';
-  const shortDomain = (d) => (d || '').replace(/^www\./, '').replace(/\.(com|org|io|co|app|ai)$/, '');
+  // Show a neutral category label (discussion / tech / news) instead of the
+  // specific platform domain. Users click through if they want the source.
+  const kindLabel = (k) => ({ discussion: 'discussion', tech: 'tech', news: 'news' })[k] || 'mention';
 
   return `
   <div>
@@ -1743,7 +1768,7 @@ function renderCommunityInsightsBlock(insights, job) {
               <div class="text-xs text-gray-600 mt-0.5">${t.insight}</div>
               ${sources.length ? `
                 <div class="mt-2 flex flex-wrap gap-1.5">
-                  ${sources.map(s => `<a href="${s.url}" target="_blank" rel="noopener" class="chip chip-gray text-[10px] hover:underline" title="${(s.title||'').replace(/"/g,'&quot;')}">${shortDomain(s.domain)}${s.age ? ' · ' + s.age : ''}</a>`).join('')}
+                  ${sources.map(s => `<a href="${s.url}" target="_blank" rel="noopener" class="chip chip-gray text-[10px] hover:underline" title="${(s.title||'').replace(/"/g,'&quot;')}">${kindLabel(s.kind)}${s.age ? ' · ' + s.age : ''}</a>`).join('')}
                 </div>` : ''}
             </div>`;
           }).join('')}
@@ -1755,7 +1780,7 @@ function renderCommunityInsightsBlock(insights, job) {
           <div class="mt-2 space-y-1">
             ${cites.slice(0, 20).map(c => `
               <a href="${c.url}" target="_blank" rel="noopener" class="block text-xs text-gray-700 hover:text-indigo-700 hover:underline">
-                <span class="text-gray-400">${shortDomain(c.domain)}${c.age ? ' · ' + c.age : ''}</span> — ${c.title}
+                <span class="text-gray-400">${kindLabel(c.kind)}${c.age ? ' · ' + c.age : ''}</span> — ${c.title}
               </a>`).join('')}
           </div>
         </details>` : ''}
@@ -1881,8 +1906,8 @@ function onSwipeKeyDown(e) {
 if (typeof window !== 'undefined') window.addEventListener('keydown', onSwipeKeyDown);
 
 // Opens the scrollable job-details modal. `scrollTo` targets a section
-// anchor inside the modal body (insights | apply | description). The modal
-// lives outside the job card so scroll-in-card is independent.
+// anchor inside the modal body (apply | description). The modal lives
+// outside the job card so scroll-in-card is independent.
 function openJobDetails(jobId, scrollTo) {
   state.jobDetailsModal = { jobId, scrollTo: scrollTo || null };
   render();
@@ -1896,6 +1921,18 @@ function openJobDetails(jobId, scrollTo) {
 
 function closeJobDetails() {
   state.jobDetailsModal = null;
+  render();
+}
+
+// Insights get their own dedicated modal — a compact shadowbox popup that
+// shows ONLY community intel, so clicking "Insights" doesn't open the big
+// Details modal scrolled to the bottom.
+function openInsightsModal(jobId) {
+  state.insightsModal = { jobId };
+  render();
+}
+function closeInsightsModal() {
+  state.insightsModal = null;
   render();
 }
 
@@ -2026,7 +2063,7 @@ function renderJobCard(j, c) {
           <button data-action="open-details" data-job="${j.id}" data-scroll="apply" class="btn btn-primary text-xs">
             ${submitted ? '✓ Submitted' : generated ? '📝 Review application' : '✨ Start application'}
           </button>
-          <button data-action="open-details" data-job="${j.id}" data-scroll="insights" class="btn btn-secondary text-xs">🗣 Insights</button>
+          <button data-action="open-insights" data-job="${j.id}" class="btn btn-secondary text-xs">🗣 Insights</button>
           <select data-action="job-status" data-job="${j.id}" class="text-xs border border-gray-300 rounded-lg px-2 py-1.5 ml-auto">
             ${['new','interested','applied','interviewing','offer','rejected'].map(s=>`<option value="${s}" ${j.status===s?'selected':''}>${s}</option>`).join('')}
           </select>
@@ -2097,18 +2134,9 @@ function renderJobDetailsModal() {
           ${renderJobApplyPanel(j, c)}
         </section>
 
-        <section id="jd-section-insights">
-          <div class="flex items-center justify-between mb-2">
-            <div class="text-xs font-semibold uppercase tracking-wide text-gray-500">🗣 Insights</div>
-          </div>
-          ${j.extra?.communityInsights
-            ? renderCommunityInsightsBlock(j.extra.communityInsights, j)
-            : `<div class="card p-5 text-center">
-                 <div class="text-3xl mb-2">🗣</div>
-                 <p class="text-sm text-gray-600 mb-4">Pull a fresh read on <b>${j.company}</b> from public discussions, news, and community chatter.</p>
-                 <button data-action="fetch-culture-intel" data-job="${j.id}" class="btn btn-primary text-sm">Load insights</button>
-               </div>`}
-        </section>
+        <div class="pt-3 border-t border-gray-100">
+          <button data-action="open-insights" data-job="${j.id}" class="btn btn-secondary text-sm inline-flex items-center gap-2">🗣 Open insights for ${j.company}</button>
+        </div>
       </div>
     </div>
   </div>`;
@@ -2117,6 +2145,40 @@ function renderJobDetailsModal() {
 // Renders the "description + company + outreach" body used inside the
 // scrollable modal. Insights now live in their own modal section, so this
 // function no longer renders them here.
+// Dedicated Insights shadowbox. Smaller than the Details modal, focused on
+// community intel only. Triggers a fetch automatically if nothing is loaded yet.
+function renderInsightsModal() {
+  const m = state.insightsModal;
+  if (!m?.jobId) return '';
+  const c = state.client || {};
+  const j = (c.jobs || []).find(x => x.id === m.jobId);
+  if (!j) return '';
+  const insights = j.extra?.communityInsights;
+  return `
+  <div class="modal-back" data-action="close-insights">
+    <div class="bg-white rounded-2xl w-full max-w-xl max-h-[85vh] flex flex-col shadow-2xl" onclick="event.stopPropagation()">
+      <div class="p-5 border-b border-gray-200 flex items-start gap-3">
+        ${companyLogo(j)}
+        <div class="flex-1 min-w-0">
+          <div class="text-xs uppercase tracking-wider text-gray-500 font-semibold">🗣 Insights</div>
+          <h2 class="font-headline font-bold text-lg leading-tight mt-0.5">${j.company}</h2>
+          <div class="text-xs text-gray-500 mt-0.5">${j.title}</div>
+        </div>
+        <button data-action="close-insights" class="text-gray-400 hover:text-gray-700 text-2xl leading-none shrink-0" title="Close">×</button>
+      </div>
+      <div class="flex-1 overflow-y-auto p-5">
+        ${insights
+          ? renderCommunityInsightsBlock(insights, j)
+          : `<div class="text-center py-8">
+               <div class="text-3xl mb-3">🗣</div>
+               <p class="text-sm text-gray-600 mb-4 max-w-xs mx-auto">Pull a fresh read on <b>${j.company}</b> from public discussions and recent coverage.</p>
+               <button data-action="fetch-culture-intel" data-job="${j.id}" data-in-modal="insights" class="btn btn-primary text-sm">Load insights</button>
+             </div>`}
+      </div>
+    </div>
+  </div>`;
+}
+
 function renderJobDetailsPanel(j) {
   const co = j.extra?.company || {};
   const desc = j.extra?.description || '';
@@ -2744,7 +2806,11 @@ async function handleAction(e) {
       el.disabled = true; el.innerHTML = '<span class="spinner"></span> Creating…';
       await registerNewClient(name); break; }
 
-    case 'set-tab': setState({ tab: el.dataset.tab }); break;
+    case 'set-tab': {
+      const t = el.dataset.tab;
+      saveUIPrefs({ tab: t });
+      setState({ tab: t });
+      break; }
     case 'refresh': await loadAndBoot(); break;
 
     case 'start-assessment': {
@@ -2931,6 +2997,9 @@ async function handleAction(e) {
       openJobDetails(el.dataset.job, el.dataset.scroll || null);
       break; }
     case 'close-details': closeJobDetails(); break;
+
+    case 'open-insights':  openInsightsModal(el.dataset.job); break;
+    case 'close-insights': closeInsightsModal(); break;
 
     // Legacy no-ops (kept for any stale buttons cached in closed tabs)
     case 'toggle-job-details': openJobDetails(el.dataset.job); break;
